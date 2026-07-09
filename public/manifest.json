@@ -1,0 +1,16 @@
+{
+  "name": "The Royal Kitchen",
+  "short_name": "Royal Kitchen",
+  "description": "Premium Restaurant QR Ordering System",
+  "start_url": "/menu",
+  "display": "standalone",
+  "background_color": "#fafafa",
+  "theme_color": "#f97316",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
