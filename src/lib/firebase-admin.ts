@@ -3,19 +3,22 @@ import { initializeApp, getApps, cert, type ServiceAccount } from "firebase-admi
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
 
-const projectId   = process.env.FIREBASE_PROJECT_ID;
-const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-const privateKey  = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+const projectId   = process.env.FIREBASE_PROJECT_ID   || "";
+const clientEmail = process.env.FIREBASE_CLIENT_EMAIL || "";
+const privateKey = process.env.FIREBASE_PRIVATE_KEY 
+  ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') 
+  : undefined;
 
-if (!projectId || !clientEmail || !privateKey) {
-  throw new Error("Missing Firebase Admin credentials in .env.local");
-}
-
+// Build time pe crash mat karo — runtime pe check hoga
 const adminApp =
   getApps().length > 0
     ? getApps()[0]
     : initializeApp({
-        credential: cert({ projectId, clientEmail, privateKey } as ServiceAccount),
+        credential: cert({
+          projectId,
+          clientEmail,
+          privateKey,
+        } as ServiceAccount),
       });
 
 export const db        = getFirestore(adminApp);
