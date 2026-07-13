@@ -1,3 +1,4 @@
+// src/app/api/admin/tables/route.ts
 import {
   db,
   collection,
@@ -20,9 +21,13 @@ const RESTAURANT_ID =
   process.env.NEXT_PUBLIC_RESTAURANT_ID ||
   "a0000000-0000-0000-0000-000000000001";
 
+// ✅ Fix: trailing slash remove karo aur production URL use karo
 const BASE_URL =
-  process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+  (process.env.NEXT_PUBLIC_BASE_URL || "https://online-orderingsystem.vercel.app").replace(/\/$/, "");
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET - Sab tables fetch karo
+// ─────────────────────────────────────────────────────────────────────────────
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -39,18 +44,18 @@ export async function GET(request: Request) {
       .map((d) => {
         const data = d.data() as any;
         return {
-          id: d.id,
-          restaurantId: data.restaurantId || restaurantId,
-          number: Number(data.number || 0),
-          name: data.name || `Table ${data.number || ""}`,
-          capacity: Number(data.capacity || 4),
-          status: data.status || "available",
-          qrCode: data.qrCode || "",
-          currentOrderId: data.currentOrderId || null,
+          id:               d.id,
+          restaurantId:     data.restaurantId || restaurantId,
+          number:           Number(data.number || 0),
+          name:             data.name || `Table ${data.number || ""}`,
+          capacity:         Number(data.capacity || 4),
+          status:           data.status || "available",
+          qrCode:           data.qrCode || "",
+          currentOrderId:   data.currentOrderId || null,
           currentSessionId: data.currentSessionId || null,
-          occupiedBy: data.occupiedBy || null,
-          occupiedAt: data.occupiedAt || null,
-          clearedAt: data.clearedAt || null,
+          occupiedBy:       data.occupiedBy || null,
+          occupiedAt:       data.occupiedAt || null,
+          clearedAt:        data.clearedAt || null,
         };
       })
       .sort((a, b) => a.number - b.number);
@@ -60,8 +65,8 @@ export async function GET(request: Request) {
       {
         headers: {
           "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
-          Pragma: "no-cache",
-          Expires: "0",
+          Pragma:          "no-cache",
+          Expires:         "0",
         },
       }
     );
@@ -71,47 +76,51 @@ export async function GET(request: Request) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST - Naya table banao
+// ─────────────────────────────────────────────────────────────────────────────
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const body         = await request.json();
     const restaurantId = body.restaurantId || RESTAURANT_ID;
 
     const tableData = {
       restaurantId,
-      number: Number(body.number),
-      name: body.name || `Table ${body.number}`,
-      capacity: Number(body.capacity || 4),
-      status: "available",
-      qrCode: "",
-      currentOrderId: null,
+      number:           Number(body.number),
+      name:             body.name || `Table ${body.number}`,
+      capacity:         Number(body.capacity || 4),
+      status:           "available",
+      qrCode:           "",
+      currentOrderId:   null,
       currentSessionId: null,
-      occupiedBy: null,
-      occupiedAt: null,
-      clearedAt: null,
-      isBlocked: false,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+      occupiedBy:       null,
+      occupiedAt:       null,
+      clearedAt:        null,
+      isBlocked:        false,
+      createdAt:        serverTimestamp(),
+      updatedAt:        serverTimestamp(),
     };
 
     const docRef = await addDoc(collection(db, "tables"), tableData);
 
-    // ✅ signed QR token
+    // ✅ Signed QR token
     const qrToken = signTableQrToken({
       restaurantId,
-      tableId: docRef.id,
+      tableId:     docRef.id,
       tableNumber: Number(body.number),
-      branchId: null,
+      branchId:    null,
     });
 
-    const tableUrl = `${BASE_URL}/menu?q=${encodeURIComponent(qrToken)}`;
+    // ✅ Sahi BASE_URL use ho raha hai
+    const tableUrl  = `${BASE_URL}/menu?q=${encodeURIComponent(qrToken)}`;
     const qrDataUrl = await QRCode.toDataURL(tableUrl, {
-      width: 512,
+      width:  512,
       margin: 2,
-      color: { dark: "#0f172a", light: "#ffffff" },
+      color:  { dark: "#0f172a", light: "#ffffff" },
     });
 
     await updateDoc(docRef, {
-      qrCode: qrDataUrl,
+      qrCode:    qrDataUrl,
       qrToken,
       updatedAt: serverTimestamp(),
     });
@@ -128,9 +137,65 @@ export async function POST(request: Request) {
   }
 }
 
-export async function PUT(request: Request) {
+// ─────────────────────────────────────────────────────────────────────────────
+// PATCH - Existing table ka QR regenerate karo
+// ─────────────────────────────────────────────────────────────────────────────
+export async function PATCH(request: Request) {
   try {
     const body = await request.json();
+    const { id } = body;
+
+    if (!id) {
+      return Response.json({ error: "ID required" }, { status: 400 });
+    }
+
+    const ref       = doc(db, "tables", id);
+    const freshSnap = await getDoc(ref);
+    const tableData = freshSnap.data() as any;
+
+    if (!tableData) {
+      return Response.json({ error: "Table not found" }, { status: 404 });
+    }
+
+    const restaurantId = tableData.restaurantId || RESTAURANT_ID;
+
+    // ✅ Naya QR token
+    const qrToken = signTableQrToken({
+      restaurantId,
+      tableId:     id,
+      tableNumber: Number(tableData.number),
+      branchId:    null,
+    });
+
+    // ✅ Production URL ke saath QR banao
+    const tableUrl  = `${BASE_URL}/menu?q=${encodeURIComponent(qrToken)}`;
+    const qrDataUrl = await QRCode.toDataURL(tableUrl, {
+      width:  512,
+      margin: 2,
+      color:  { dark: "#0f172a", light: "#ffffff" },
+    });
+
+    await updateDoc(ref, {
+      qrCode:    qrDataUrl,
+      qrToken,
+      updatedAt: serverTimestamp(),
+    });
+
+    const updated = await getDoc(ref);
+    return Response.json({ table: { id, ...updated.data() } });
+
+  } catch (error) {
+    console.error("Tables PATCH error:", error);
+    return Response.json({ error: "Failed" }, { status: 500 });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PUT - Table details update karo
+// ─────────────────────────────────────────────────────────────────────────────
+export async function PUT(request: Request) {
+  try {
+    const body     = await request.json();
     const { id, ...rest } = body;
 
     if (!id) {
@@ -153,6 +218,9 @@ export async function PUT(request: Request) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DELETE - Table delete karo
+// ─────────────────────────────────────────────────────────────────────────────
 export async function DELETE(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
