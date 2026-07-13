@@ -3,23 +3,72 @@ import { initializeApp, getApps, cert, type ServiceAccount } from "firebase-admi
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
 
-const projectId   = process.env.FIREBASE_PROJECT_ID   || "";
-const clientEmail = process.env.FIREBASE_CLIENT_EMAIL || "";
-const privateKey = process.env.FIREBASE_PRIVATE_KEY 
-  ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') 
-  : undefined;
+// ── Private Key Parser ────────────────────────────────────────────────────────
+function parsePrivateKey(raw: string | undefined): string {
+  if (!raw) {
+    throw new Error("❌ FIREBASE_PRIVATE_KEY is missing from environment variables");
+  }
 
-// Build time pe crash mat karo — runtime pe check hoga
-const adminApp =
-  getApps().length > 0
-    ? getApps()[0]
-    : initializeApp({
-        credential: cert({
-          projectId,
-          clientEmail,
-          privateKey,
-        } as ServiceAccount),
-      });
+  let key = raw;
+
+  // Step 1: Remove surrounding quotes if present (common .env issue)
+  if ((key.startsWith('"') && key.endsWith('"')) || 
+      (key.startsWith("'") && key.endsWith("'"))) {
+    key = key.slice(1, -1);
+  }
+
+  // Step 2: Replace escaped newlines with real newlines
+  key = key.replace(/\\n/g, "\n");
+
+  // Step 3: Validate the key format
+  if (!key.includes("-----BEGIN PRIVATE KEY-----")) {
+    throw new Error(
+      "❌ FIREBASE_PRIVATE_KEY is invalid. Must start with '-----BEGIN PRIVATE KEY-----'"
+    );
+  }
+
+  if (!key.includes("-----END PRIVATE KEY-----")) {
+    throw new Error(
+      "❌ FIREBASE_PRIVATE_KEY is invalid. Must end with '-----END PRIVATE KEY-----'"
+    );
+  }
+
+  return key;
+}
+
+// ── Validate all required env vars ───────────────────────────────────────────
+function validateEnvVars() {
+  const missing: string[] = [];
+
+  if (!process.env.FIREBASE_PROJECT_ID)   missing.push("FIREBASE_PROJECT_ID");
+  if (!process.env.FIREBASE_CLIENT_EMAIL) missing.push("FIREBASE_CLIENT_EMAIL");
+  if (!process.env.FIREBASE_PRIVATE_KEY)  missing.push("FIREBASE_PRIVATE_KEY");
+
+  if (missing.length > 0) {
+    throw new Error(`❌ Missing Firebase env vars: ${missing.join(", ")}`);
+  }
+}
+
+// ── Initialize Firebase Admin ─────────────────────────────────────────────────
+function initializeAdminApp() {
+  if (getApps().length > 0) {
+    return getApps()[0];
+  }
+
+  validateEnvVars();
+
+  const privateKey = parsePrivateKey(process.env.FIREBASE_PRIVATE_KEY);
+
+  return initializeApp({
+    credential: cert({
+      projectId:   process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey,
+    }),
+  });
+}
+
+const adminApp = initializeAdminApp();
 
 export const db        = getFirestore(adminApp);
 export const adminAuth = getAuth(adminApp);
@@ -134,7 +183,6 @@ export async function setDoc(
   else await ref.set(data);
 }
 
-// ✅ Returns actual DocumentReference so updateDoc works after addDoc
 export async function addDoc(
   ref:  FirebaseFirestore.CollectionReference,
   data: Record<string, unknown>
@@ -143,7 +191,6 @@ export async function addDoc(
   return docRef;
 }
 
-// ✅ Uses .set() with merge - .update() was failing
 export async function updateDoc(
   ref:  FirebaseFirestore.DocumentReference,
   data: Record<string, unknown>
@@ -163,34 +210,8 @@ export const arrayRemove     = (...items: unknown[]) => FieldValue.arrayRemove(.
 
 // ── Type exports ──────────────────────────────────────────────────────────────
 export type { ServiceAccount };
-// ── Shared Types (firebase-admin routes ke liye) ──────────────────────────────
-export interface Coupon {
-  id:            string;
-  code:          string;
-  discountType:  "percentage" | "flat";
-  discountValue: number;
-  minOrder?:     number;
-  maxDiscount?:  number;
-  isActive?:     boolean;
-  usageLimit?:   number;
-  usageCount?:   number;
-  expiresAt?:    unknown;
-  createdAt?:    unknown;
-}
 
-export interface Restaurant {
-  id:           string;
-  name:         string;
-  logo?:        string;
-  description?: string;
-  address?:     string;
-  phone?:       string;
-  email?:       string;
-  currency?:    string;
-  taxRate?:     number;
-  isOpen?:      boolean;
-}
-
+// ── Shared Types ──────────────────────────────────────────────────────────────
 export interface MenuItem {
   id:              string;
   categoryId:      string;
@@ -245,38 +266,25 @@ export interface Offer {
   validTo?:      unknown;
   createdAt?:    unknown;
 }
+
+// ── Merged & Deduplicated Interfaces ─────────────────────────────────────────
 export interface Coupon {
   id:             string;
   code:           string;
-  description?:   string;       // ✅ Added
+  description?:   string;
   discountType:   "percentage" | "flat";
   discountValue:  number;
   minOrder?:      number;
-  minOrderValue?: number;       // ✅ Added
+  minOrderValue?: number;
   maxDiscount?:   number;
   isActive?:      boolean;
   usageLimit?:    number;
   usageCount?:    number;
-  usedCount?:     number;       // ✅ Added
+  usedCount?:     number;
   expiresAt?:     unknown;
   createdAt?:     unknown;
 }
 
-export interface Restaurant {
-  id:           string;
-  name:         string;
-  logo?:        string;
-  description?: string;
-  address?:     string;
-  phone?:       string;
-  email?:       string;
-  currency?:    string;
-  taxRate?:     number;
-  gstRate?:     number;
-  gstNumber?:   string;
-  paymentMode?: string;         // ✅ Added
-  isOpen?:      boolean;
-}
 export interface Restaurant {
   id:            string;
   name:          string;
@@ -298,5 +306,5 @@ export interface Restaurant {
   acceptCard?:   boolean;
   updatedAt?:    unknown;
   createdAt?:    unknown;
-  [key: string]: unknown; // ✅ Any future field allow karega
+  [key: string]: unknown;
 }
