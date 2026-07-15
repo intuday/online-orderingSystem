@@ -77,12 +77,13 @@ function LoginContent() {
   };
 
   const goSuccess = (role: string) => {
-    setStep("success");
-    setTimeout(() => {
-      router.push(buildRedirect(role));
-      router.refresh();
-    }, 900);
-  };
+  setStep("success");
+  const destination = buildRedirect(role);
+  setTimeout(() => {
+    window.location.href = destination;
+  }, 900);
+};
+
 
   const handleAuthSuccess = async (idToken: string) => {
     const res  = await fetch("/api/auth/login", {
