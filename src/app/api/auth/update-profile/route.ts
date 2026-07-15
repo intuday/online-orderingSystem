@@ -1,69 +1,75 @@
-import { NextRequest, NextResponse } from "next/server";
-import { verify, sign } from "jsonwebtoken";
-import { db, doc, serverTimestamp } from "@/lib/firebase-admin";
+// src/app/api/auth/update-profile/route.ts
+//
+// Updates name and phone in the user's Firestore profile.
+// The auth-token cookie contains a Firebase ID token — it cannot be
+// re-issued server-side. The client must call firebaseUser.getIdToken()
+// and re-POST to /api/auth/login to refresh the session cookie if needed.
+// Profile fields (name, phone) are always read from Firestore by verify-status.
 
-const JWT_SECRET = process.env.JWT_SECRET || "restaurant-saas-super-secret-jwt-key-2024";
+import { NextRequest, NextResponse } from "next/server";
+import {
+  adminAuth, db,
+  doc, setDoc,
+  serverTimestamp,
+}                                    from "@/lib/firebase-admin";
+
+// ─── Route Handler ────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
   try {
-    // ✅ Auth check
+    // ── Authentication ──────────────────────────────────────────────────────
+    // Verify Firebase ID token from cookie.
+
     const token = req.cookies.get("auth-token")?.value;
+
     if (!token) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const decoded = verify(token, JWT_SECRET) as any;
-    const { name, phone } = await req.json();
-
-    if (!name?.trim()) {
-      return NextResponse.json({ error: "Name is required" }, { status: 400 });
+    let uid: string;
+    try {
+      const decoded = await adminAuth.verifyIdToken(token);
+      uid           = decoded.uid;
+    } catch {
+      return NextResponse.json({ error: "Invalid or expired token" }, { status: 401 });
     }
 
-    // ✅ Firestore update
-    const userRef = doc(db, "users", decoded.uid);
-    await userRef.set({
-      name:      name.trim(),
-      phone:     phone?.trim() || "",
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
+    // ── Parse & Validate Body ───────────────────────────────────────────────
 
-    // ✅ JWT token bhi update karo (taaki cookie mein naya name aaye)
-    const newToken = sign(
+    const body = await req.json() as Record<string, unknown>;
+
+    const name  = typeof body.name  === "string" ? body.name.trim()  : "";
+    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
+
+    if (!name) {
+      return NextResponse.json(
+        { error: "Name is required" },
+        { status: 400 }
+      );
+    }
+
+    // ── Update Firestore Profile ────────────────────────────────────────────
+    // Only update name and phone — never allow role or restaurantId updates
+    // through this endpoint.
+
+    await setDoc(
+      doc(db, "users", uid),
       {
-        uid:          decoded.uid,
-        email:        decoded.email,
-        role:         decoded.role,
-        restaurantId: decoded.restaurantId,
-        name:         name.trim(),
-        phone:        phone?.trim() || "",
+        name,
+        phone,
+        updatedAt: serverTimestamp(),
       },
-      JWT_SECRET,
-      { expiresIn: "7d" }
+      { merge: true }
     );
 
-    const response = NextResponse.json({ success: true });
+    // ── Response ────────────────────────────────────────────────────────────
+    // Cookie is NOT updated here — it contains a Firebase ID token which is
+    // issued by Google and cannot be re-signed server-side.
+    // The client reads updated profile data via /api/auth/verify-status
+    // which always reads from Firestore.
 
-    // ✅ Updated cookie
-    response.cookies.set("auth-token", newToken, {
-      httpOnly: true,
-      secure:   process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge:   60 * 60 * 24 * 7,
-      path:     "/",
-    });
+    return NextResponse.json({ success: true });
 
-    // Admin token bhi update karo
-    if (decoded.role === "admin" || decoded.role === "super_admin") {
-      response.cookies.set("admin-token", newToken, {
-        httpOnly: true,
-        secure:   process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge:   60 * 60 * 24 * 7,
-        path:     "/",
-      });
-    }
-
-    return response;
   } catch (error) {
     console.error("Update profile error:", error);
     return NextResponse.json({ error: "Failed to update profile" }, { status: 500 });

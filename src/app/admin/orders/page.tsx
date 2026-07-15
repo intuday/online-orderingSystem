@@ -1,18 +1,20 @@
+// src/app/admin/orders/page.tsx
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence }          from "framer-motion";
 import {
   ShoppingBag, Clock, ChefHat, Check, X,
   Printer, FileText, Search, Phone,
   CreditCard, Banknote, RefreshCw, Bell,
 } from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
-import type { Order, OrderItem } from "@/lib/firebase";
+import { Skeleton }                   from "@/components/ui/skeleton";
+import { Button }                     from "@/components/ui/button";
+import type { Order, OrderItem, PaymentMode } from "@/lib/types";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
+
 const STATUS_TABS = [
   { key: "all",       label: "All" },
   { key: "pending",   label: "Pending" },
@@ -46,7 +48,33 @@ const STATUS_LABEL: Record<string, string> = {
   completed: "Complete Order",
 };
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const VALID_PAYMENT_MODES: PaymentMode[] = ["cash", "card", "upi", "online"];
+
+function toPaymentMode(value: string): PaymentMode {
+  return VALID_PAYMENT_MODES.includes(value as PaymentMode)
+    ? (value as PaymentMode)
+    : "cash";
+}
+
+function getTableLabel(order: Order): string {
+  if (order.tableName)   return order.tableName;
+  if (order.tableNumber) return `Table ${order.tableNumber}`;
+  if (order.tableId)     return `Table ${order.tableId}`;
+  return "Counter";
+}
+
+function parseItems(items: unknown): OrderItem[] {
+  if (Array.isArray(items)) return items as OrderItem[];
+  if (typeof items === "string") {
+    try { return JSON.parse(items); } catch { return []; }
+  }
+  return [];
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
+
 export default function OrdersPage() {
   const [orders, setOrders]               = useState<Order[]>([]);
   const [loading, setLoading]             = useState(true);
@@ -56,25 +84,12 @@ export default function OrdersPage() {
   const [searchQuery, setSearchQuery]     = useState("");
   const [lastRefresh, setLastRefresh]     = useState(new Date());
 
-  // const fetchOrders = useCallback(async (silent = false) => {
-  //   if (!silent) setLoading(true);
-  //   else setRefreshing(true);
-  //   try {
-  //     const res  = await fetch("/api/orders?restaurantId=a0000000-0000-0000-0000-000000000001");
-  //     const data = await res.json();
-  //     setOrders(data.orders || []);
-  //     setLastRefresh(new Date());
-  //   } finally {
-  //     setLoading(false);
-  //     setRefreshing(false);
-  //   }
-  // }, []);
-    const fetchOrders = useCallback(async (silent = false) => {
+  const fetchOrders = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
 
     try {
-      const res = await fetch("/api/orders?restaurantId=a0000000-0000-0000-0000-000000000001");
+      const res  = await fetch("/api/orders?restaurantId=a0000000-0000-0000-0000-000000000001");
       const data = await res.json();
       setOrders(data.orders || []);
       setLastRefresh(new Date());
@@ -88,7 +103,6 @@ export default function OrdersPage() {
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
-  // ✅ Auto-refresh every 30 seconds
   useEffect(() => {
     const interval = setInterval(() => fetchOrders(true), 30000);
     return () => clearInterval(interval);
@@ -108,16 +122,17 @@ export default function OrdersPage() {
     );
   };
 
-  const markPaid = async (orderId: string, mode: string = "counter") => {
+  const markPaid = async (orderId: string, mode = "cash") => {
+    const safeMode = toPaymentMode(mode);
     await fetch(`/api/orders/${orderId}`, {
       method:  "PATCH",
       headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ paymentStatus: "paid", paymentMode: mode }),
+      body:    JSON.stringify({ paymentStatus: "paid", paymentMode: safeMode }),
     });
     fetchOrders(true);
     setSelectedOrder((prev) =>
       prev?.id === orderId
-        ? { ...prev, paymentStatus: "paid", paymentMode: mode }
+        ? { ...prev, paymentStatus: "paid", paymentMode: safeMode }
         : prev
     );
   };
@@ -138,7 +153,7 @@ export default function OrdersPage() {
       <body>
         <h2>🍽️ KITCHEN ORDER</h2>
         <p><strong>Order:</strong> ${order.orderNumber}</p>
-        <p><strong>Table:</strong> ${(order as any).tableName || (order as any).tableNumber || order.tableId || "Counter"}</p>
+        <p><strong>Table:</strong> ${getTableLabel(order)}</p>
         <p><strong>Customer:</strong> ${order.customerName || "Guest"}</p>
         <p><strong>Time:</strong> ${formatDate(order.createdAt)}</p>
         <hr/>
@@ -146,7 +161,7 @@ export default function OrdersPage() {
           <div class="item">
             <span><span class="qty">${i.quantity}x</span>${i.name}${i.variant ? ` (${i.variant})` : ""}</span>
           </div>
-          ${i.addons?.length ? `<div class="note">+ ${i.addons.map((a: any) => a.name).join(", ")}</div>` : ""}
+          ${i.addons?.length ? `<div class="note">+ ${i.addons.map((a) => a.name).join(", ")}</div>` : ""}
           ${i.specialInstructions ? `<div class="note">📝 ${i.specialInstructions}</div>` : ""}
         `).join("")}
         ${order.notes ? `<hr/><p style="font-size:11px"><strong>Notes:</strong> ${order.notes}</p>` : ""}
@@ -184,7 +199,7 @@ export default function OrdersPage() {
         <div class="row"><span><strong>${order.orderNumber}</strong></span><span>${formatDate(order.createdAt)}</span></div>
         <div class="row"><span>Customer: ${order.customerName || "Guest"}</span></div>
         <div class="row"><span>Phone: ${order.customerPhone || "—"}</span></div>
-        ${order.tableId ? `<div class="row"><span>Table: ${(order as any).tableName || (order as any).tableNumber || order.tableId}</span></div>` : ""}
+        ${order.tableId ? `<div class="row"><span>Table: ${getTableLabel(order)}</span></div>` : ""}
         <div class="divider"></div>
         <table>
           <thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>Amt</th></tr></thead>
@@ -207,7 +222,9 @@ export default function OrdersPage() {
         ${(order.tip ?? 0) > 0 ? `<div class="row"><span>Tip</span><span>₹${order.tip}</span></div>` : ""}
         <div class="row total"><span>Total</span><span>₹${order.total}</span></div>
         <div class="divider"></div>
-        <p class="paid">${order.paymentStatus === "paid" ? `✅ PAID (${(order as any).paymentMode || "Counter"})` : "⏳ PAYMENT PENDING"}</p>
+        <p class="paid">${order.paymentStatus === "paid"
+          ? `✅ PAID (${order.paymentMode || "Counter"})`
+          : "⏳ PAYMENT PENDING"}</p>
         <div class="footer">
           <p>Thank you for dining with us!</p>
           <p>Visit again 🙏</p>
@@ -217,7 +234,6 @@ export default function OrdersPage() {
     if (w) { w.document.write(content); w.document.close(); w.print(); }
   };
 
-  // ✅ Pending payments count
   const pendingPayments = orders.filter(
     (o) => o.paymentStatus !== "paid" && o.status !== "cancelled"
   ).length;
@@ -236,10 +252,14 @@ export default function OrdersPage() {
       <div className="space-y-6">
         <Skeleton className="h-8 w-48" />
         <div className="flex gap-2">
-          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-9 w-24 rounded-full" />)}
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-9 w-24 rounded-full" />
+          ))}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-36 rounded-2xl" />)}
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-36 rounded-2xl" />
+          ))}
         </div>
       </div>
     );
@@ -262,7 +282,11 @@ export default function OrdersPage() {
             )}
             <span className="text-xs text-slate-400 flex items-center gap-1">
               <Clock className="w-3 h-3" />
-              {lastRefresh.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+              {lastRefresh.toLocaleTimeString("en-IN", {
+                hour:   "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })}
             </span>
           </div>
         </div>
@@ -305,7 +329,9 @@ export default function OrdersPage() {
               {tab.label}
               {count > 0 && (
                 <span className={`h-4 min-w-4 px-1 rounded-full text-[10px] font-bold flex items-center justify-center ${
-                  activeTab === tab.key ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"
+                  activeTab === tab.key
+                    ? "bg-white/20 text-white"
+                    : "bg-slate-100 text-slate-500"
                 }`}>
                   {count}
                 </span>
@@ -318,8 +344,8 @@ export default function OrdersPage() {
       {/* Orders Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {filtered.map((order) => {
-          const items = parseItems(order.items);
-          const cfg   = STATUS_CONFIG[order.status || "pending"] || STATUS_CONFIG.pending;
+          const items  = parseItems(order.items);
+          const cfg    = STATUS_CONFIG[order.status ?? "pending"] ?? STATUS_CONFIG.pending;
           const isPaid = order.paymentStatus === "paid";
 
           return (
@@ -330,7 +356,6 @@ export default function OrdersPage() {
               onClick={() => setSelectedOrder(order)}
               className="bg-white rounded-2xl p-4 shadow-card cursor-pointer hover:shadow-elevated transition-all border border-transparent hover:border-orange-200 group"
             >
-              {/* Top Row */}
               <div className="flex items-start justify-between mb-3">
                 <div>
                   <h3 className="text-sm font-bold text-slate-900 font-mono">{order.orderNumber}</h3>
@@ -340,43 +365,38 @@ export default function OrdersPage() {
                   <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${cfg.bg} ${cfg.color}`}>
                     {order.status}
                   </span>
-                  {/* ✅ Payment badge - prominent */}
                   <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                    isPaid
-                      ? "bg-green-100 text-green-700"
-                      : "bg-red-100 text-red-600"
+                    isPaid ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"
                   }`}>
                     {isPaid ? "✓ PAID" : "UNPAID"}
                   </span>
                 </div>
               </div>
 
-              {/* Customer */}
               <div className="flex items-center gap-1.5 mb-2">
                 <div className="w-6 h-6 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 text-[10px] font-bold shrink-0">
                   {(order.customerName || "G").charAt(0).toUpperCase()}
                 </div>
-                <span className="text-xs text-slate-600 font-medium line-clamp-1">{order.customerName || "Guest"}</span>
+                <span className="text-xs text-slate-600 font-medium line-clamp-1">
+                  {order.customerName || "Guest"}
+                </span>
                 {order.customerPhone && (
                   <span className="text-[10px] text-slate-400">• {order.customerPhone}</span>
                 )}
               </div>
 
-              {/* Items */}
               <p className="text-xs text-slate-400 line-clamp-1 mb-3">
                 {items.map((i) => `${i.quantity}× ${i.name}`).join(" • ")}
               </p>
 
-              {/* Bottom Row */}
               <div className="flex items-center justify-between pt-3 border-t border-slate-100">
                 <span className="text-base font-bold text-slate-900">{formatCurrency(order.total)}</span>
                 <div className="flex items-center gap-2">
                   {order.tableId && (
                     <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-medium">
-                      {(order as any).tableName || `Table ${(order as any).tableNumber || order.tableId}`}
+                      {getTableLabel(order)}
                     </span>
                   )}
-                  {/* ✅ Quick Pay button on card */}
                   {!isPaid && order.status !== "cancelled" && (
                     <button
                       onClick={(e) => {
@@ -403,7 +423,6 @@ export default function OrdersPage() {
         </div>
       )}
 
-      {/* Order Detail Modal */}
       <AnimatePresence>
         {selectedOrder && (
           <OrderDetailModal
@@ -421,20 +440,21 @@ export default function OrdersPage() {
 }
 
 // ─── Order Detail Modal ───────────────────────────────────────────────────────
+
 function OrderDetailModal({
   order, onClose, onStatusUpdate, onMarkPaid, onPrintKOT, onPrintInvoice,
 }: {
-  order:            Order;
-  onClose:          () => void;
-  onStatusUpdate:   (id: string, status: string) => void;
-  onMarkPaid:       (id: string, mode?: string) => void;
-  onPrintKOT:       (order: Order) => void;
-  onPrintInvoice:   (order: Order) => void;
+  order:          Order;
+  onClose:        () => void;
+  onStatusUpdate: (id: string, status: string) => void;
+  onMarkPaid:     (id: string, mode?: string) => void;
+  onPrintKOT:     (order: Order) => void;
+  onPrintInvoice: (order: Order) => void;
 }) {
   const items      = parseItems(order.items);
   const isPaid     = order.paymentStatus === "paid";
-  const nextStatus = NEXT_STATUS[order.status || ""];
-  const statusCfg  = STATUS_CONFIG[order.status || "pending"] || STATUS_CONFIG.pending;
+  const nextStatus = NEXT_STATUS[order.status ?? ""];
+  const statusCfg  = STATUS_CONFIG[order.status ?? "pending"] ?? STATUS_CONFIG.pending;
 
   return (
     <motion.div
@@ -462,7 +482,10 @@ function OrderDetailModal({
             </div>
             <p className="text-xs text-slate-400 mt-0.5">{formatDate(order.createdAt)}</p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center">
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center"
+          >
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -470,9 +493,11 @@ function OrderDetailModal({
         {/* Scrollable Content */}
         <div className="overflow-y-auto flex-1 p-5 space-y-4">
 
-          {/* ✅ Payment Status - Prominent */}
+          {/* Payment Status */}
           <div className={`rounded-2xl p-4 flex items-center justify-between ${
-            isPaid ? "bg-green-50 border border-green-200" : "bg-red-50 border border-red-200"
+            isPaid
+              ? "bg-green-50 border border-green-200"
+              : "bg-red-50 border border-red-200"
           }`}>
             <div className="flex items-center gap-3">
               <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
@@ -488,16 +513,15 @@ function OrderDetailModal({
                 </p>
                 <p className="text-xs text-slate-500">
                   {isPaid
-                    ? `Paid via ${(order as any).paymentMode || "Counter"}`
+                    ? `Paid via ${order.paymentMode || "Counter"}`
                     : `Total: ${formatCurrency(order.total)}`}
                 </p>
               </div>
             </div>
-            {/* ✅ Payment mode buttons */}
             {!isPaid && order.status !== "cancelled" && (
               <div className="flex flex-col gap-1.5">
                 <button
-                  onClick={() => onMarkPaid(order.id, "counter")}
+                  onClick={() => onMarkPaid(order.id, "cash")}
                   className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500 text-white text-xs font-bold rounded-xl hover:bg-green-600 transition-colors active:scale-95"
                 >
                   <Banknote className="w-3.5 h-3.5" /> Cash
@@ -525,12 +549,10 @@ function OrderDetailModal({
                 </p>
               )}
             </div>
-              {order.tableId && (
+            {order.tableId && (
               <div className="text-right">
                 <p className="text-[10px] text-slate-400">Table</p>
-                <p className="text-sm font-bold text-slate-900">
-                  {(order as any).tableName || `Table ${(order as any).tableNumber || order.tableId}`}
-                </p>
+                <p className="text-sm font-bold text-slate-900">{getTableLabel(order)}</p>
               </div>
             )}
           </div>
@@ -553,7 +575,7 @@ function OrderDetailModal({
                     )}
                     {item.addons && item.addons.length > 0 && (
                       <p className="text-[10px] text-slate-400 mt-0.5">
-                        + {item.addons.map((a: any) => a.name).join(", ")}
+                        + {item.addons.map((a) => a.name).join(", ")}
                       </p>
                     )}
                     {item.specialInstructions && (
@@ -580,7 +602,9 @@ function OrderDetailModal({
 
           {/* Bill Summary */}
           <div className="bg-slate-50 rounded-xl p-4 space-y-2 text-sm">
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Bill Summary</h3>
+            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">
+              Bill Summary
+            </h3>
             <div className="flex justify-between text-slate-600">
               <span>Subtotal</span>
               <span>{formatCurrency(order.subtotal)}</span>
@@ -589,9 +613,9 @@ function OrderDetailModal({
               <div className="flex justify-between text-green-600">
                 <span>
                   Discount
-                  {(order as any).couponCode && (
+                  {order.couponCode && (
                     <span className="ml-1 text-[10px] bg-green-100 px-1.5 py-0.5 rounded-full">
-                      {(order as any).couponCode}
+                      {order.couponCode}
                     </span>
                   )}
                 </span>
@@ -620,8 +644,6 @@ function OrderDetailModal({
 
           {/* Actions */}
           <div className="space-y-3">
-
-            {/* Print buttons */}
             <div className="grid grid-cols-2 gap-2">
               <Button variant="outline" size="sm" onClick={() => onPrintKOT(order)}>
                 <Printer className="w-4 h-4 mr-1" /> Print KOT
@@ -631,21 +653,19 @@ function OrderDetailModal({
               </Button>
             </div>
 
-            {/* ✅ Status progression button */}
             {nextStatus && order.status !== "cancelled" && (
               <button
                 onClick={() => onStatusUpdate(order.id, nextStatus)}
                 className="w-full py-3 bg-slate-900 text-white font-semibold rounded-xl flex items-center justify-center gap-2 hover:bg-slate-800 active:scale-[0.98] transition-all"
               >
                 {nextStatus === "preparing" && <ChefHat className="w-4 h-4" />}
-                {nextStatus === "ready"     && <Check    className="w-4 h-4" />}
-                {nextStatus === "served"    && <Check    className="w-4 h-4" />}
-                {nextStatus === "completed" && <Check    className="w-4 h-4" />}
+                {nextStatus === "ready"     && <Check   className="w-4 h-4" />}
+                {nextStatus === "served"    && <Check   className="w-4 h-4" />}
+                {nextStatus === "completed" && <Check   className="w-4 h-4" />}
                 {STATUS_LABEL[nextStatus]}
               </button>
             )}
 
-            {/* Cancel button */}
             {order.status !== "cancelled" && order.status !== "completed" && (
               <button
                 onClick={() => onStatusUpdate(order.id, "cancelled")}
@@ -659,13 +679,4 @@ function OrderDetailModal({
       </motion.div>
     </motion.div>
   );
-}
-
-// ─── Utility ──────────────────────────────────────────────────────────────────
-function parseItems(items: unknown): OrderItem[] {
-  if (Array.isArray(items)) return items as OrderItem[];
-  if (typeof items === "string") {
-    try { return JSON.parse(items); } catch { return []; }
-  }
-  return [];
 }

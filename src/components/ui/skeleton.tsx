@@ -1,8 +1,22 @@
+// src/components/ui/skeleton.tsx
 import { cn } from "@/lib/utils";
 
-export function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("shimmer rounded-lg", className)} {...props} />;
+// ─── Base Skeleton ────────────────────────────────────────────────────────────
+
+export function Skeleton({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      className={cn("shimmer rounded-lg", className)}
+      aria-hidden="true"
+      {...props}
+    />
+  );
 }
+
+// ─── Menu Item Skeleton ───────────────────────────────────────────────────────
 
 export function MenuItemSkeleton() {
   return (
@@ -17,10 +31,12 @@ export function MenuItemSkeleton() {
           <Skeleton className="h-8 w-16 rounded-lg" />
         </div>
       </div>
-      <Skeleton className="h-28 w-28 flex-shrink-0 rounded-xl" />
+      <Skeleton className="h-28 w-28 shrink-0 rounded-xl" />
     </div>
   );
 }
+
+// ─── Category Skeleton ────────────────────────────────────────────────────────
 
 export function CategorySkeleton() {
   return (
@@ -30,6 +46,8 @@ export function CategorySkeleton() {
     </div>
   );
 }
+
+// ─── Order Skeleton ───────────────────────────────────────────────────────────
 
 export function OrderSkeleton() {
   return (

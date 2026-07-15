@@ -6,7 +6,7 @@ import { Plus, Search, Edit2, Trash2, X, Eye, EyeOff, Flame, Star } from "lucide
 import { formatCurrency } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { MenuItem, Category } from "@/lib/firebase";
+import type { MenuItem, Category } from "@/lib/types";
 
 export default function AdminMenuPage() {
   const [items, setItems] = useState<MenuItem[]>([]);

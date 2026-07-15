@@ -1,91 +1,145 @@
+/* src/app/globals.css
+ *
+ * Global styles for the application.
+ * Uses Tailwind v4 CSS-first configuration via @theme.
+ * Font: loaded via next/font/google in layout.tsx — see --font-inter variable.
+ */
+
 @import "tailwindcss";
 
+/* ─── Theme Tokens ─────────────────────────────────────────────────────────── */
+
 @theme {
-  --color-primary: #f97316;
-  --color-primary-dark: #ea580c;
-  --color-primary-light: #fed7aa;
-  --color-accent: #0ea5e9;
-  --color-success: #22c55e;
-  --color-warning: #eab308;
-  --color-danger: #ef4444;
-  --color-surface: #ffffff;
-  --color-surface-alt: #f8fafc;
-  --color-surface-hover: #f1f5f9;
-  --color-border: #e2e8f0;
-  --color-text: #0f172a;
+  /* Colors */
+  --color-primary:        #f97316;
+  --color-primary-dark:   #ea580c;
+  --color-primary-light:  #fed7aa;
+  --color-accent:         #0ea5e9;
+  --color-success:        #22c55e;
+  --color-warning:        #eab308;
+  --color-danger:         #ef4444;
+  --color-surface:        #ffffff;
+  --color-surface-alt:    #f8fafc;
+  --color-surface-hover:  #f1f5f9;
+  --color-border:         #e2e8f0;
+  --color-text:           #0f172a;
   --color-text-secondary: #64748b;
-  --color-text-muted: #94a3b8;
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --radius-sm: 0.5rem;
-  --radius-md: 0.75rem;
-  --radius-lg: 1rem;
-  --radius-xl: 1.5rem;
+  --color-text-muted:     #94a3b8;
+
+  /* Font
+   * References the CSS variable injected by next/font/google in layout.tsx.
+   * Falls back to system fonts if the variable is not available.
+   */
+  --font-sans: var(--font-inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+
+  /* Border Radius */
+  --radius-sm:  0.5rem;
+  --radius-md:  0.75rem;
+  --radius-lg:  1rem;
+  --radius-xl:  1.5rem;
   --radius-2xl: 2rem;
 }
+
+/* ─── Base Styles ──────────────────────────────────────────────────────────── */
 
 @layer base {
   * {
     -webkit-tap-highlight-color: transparent;
   }
+
   html {
     scroll-behavior: smooth;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
+
   body {
+    /* Font is set via the font-sans Tailwind class on <body> in layout.tsx.
+     * This declaration ensures it works even without the Tailwind class. */
     font-family: var(--font-sans);
     background-color: #fafafa;
     color: var(--color-text);
     overflow-x: hidden;
   }
-  input, textarea, select {
+
+  input,
+  textarea,
+  select {
     font-family: inherit;
   }
 }
 
+/* ─── Utilities ────────────────────────────────────────────────────────────── */
+
 @layer utilities {
+
+  /* Glass morphism */
   .glass {
     background: rgba(255, 255, 255, 0.72);
     backdrop-filter: blur(20px) saturate(180%);
     -webkit-backdrop-filter: blur(20px) saturate(180%);
     border: 1px solid rgba(255, 255, 255, 0.3);
   }
+
   .glass-dark {
     background: rgba(15, 23, 42, 0.72);
     backdrop-filter: blur(20px) saturate(180%);
     -webkit-backdrop-filter: blur(20px) saturate(180%);
     border: 1px solid rgba(255, 255, 255, 0.08);
   }
+
+  /* Shadows */
   .shadow-premium {
-    box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 20px 25px -5px rgba(0,0,0,0.05), 0 40px 60px -12px rgba(0,0,0,0.04);
+    box-shadow:
+      0 4px 6px -1px rgba(0, 0, 0, 0.05),
+      0 20px 25px -5px rgba(0, 0, 0, 0.05),
+      0 40px 60px -12px rgba(0, 0, 0, 0.04);
   }
+
   .shadow-card {
-    box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.04);
+    box-shadow:
+      0 1px 3px rgba(0, 0, 0, 0.04),
+      0 4px 12px rgba(0, 0, 0, 0.04);
   }
+
   .shadow-elevated {
-    box-shadow: 0 8px 30px rgba(0,0,0,0.08);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
   }
+
+  /* Text gradient */
   .text-gradient {
     background: linear-gradient(135deg, #f97316, #ec4899);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
+
+  /* Skeleton shimmer animation */
   .shimmer {
-    background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+    background: linear-gradient(
+      90deg,
+      #f1f5f9 25%,
+      #e2e8f0 50%,
+      #f1f5f9 75%
+    );
     background-size: 200% 100%;
     animation: shimmer 1.5s infinite;
   }
+
+  /* Hide scrollbar — cross-browser */
   .hide-scrollbar::-webkit-scrollbar {
     display: none;
   }
+
   .hide-scrollbar {
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
 }
 
+/* ─── Keyframes ────────────────────────────────────────────────────────────── */
+
 @keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
 }

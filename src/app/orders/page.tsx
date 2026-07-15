@@ -1,106 +1,81 @@
+// src/app/orders/page.tsx
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { motion } from "framer-motion";
+import { motion }                            from "framer-motion";
 import { ArrowLeft, ShoppingBag, RefreshCw } from "lucide-react";
-import Link from "next/link";
-import { formatCurrency, formatDate } from "@/lib/utils";
-import { Skeleton } from "@/components/ui/skeleton";
+import Link                                  from "next/link";
+import { formatCurrency, formatDate }        from "@/lib/utils";
+import { Skeleton }                          from "@/components/ui/skeleton";
+import type { Order, OrderItem }             from "@/lib/types";
 
-const RESTAURANT_ID = "a0000000-0000-0000-0000-000000000001";
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-const statusConfig: Record<
-  string,
-  { label: string; color: string; bg: string }
-> = {
-  pending: { label: "Pending", color: "text-amber-700", bg: "bg-amber-100" },
-  preparing: { label: "Preparing", color: "text-blue-700", bg: "bg-blue-100" },
-  ready: { label: "Ready", color: "text-green-700", bg: "bg-green-100" },
-  served: { label: "Served", color: "text-emerald-700", bg: "bg-emerald-100" },
-  completed: { label: "Completed", color: "text-slate-700", bg: "bg-slate-100" },
-  cancelled: { label: "Cancelled", color: "text-red-700", bg: "bg-red-100" },
+const RESTAURANT_ID =
+  process.env.NEXT_PUBLIC_RESTAURANT_ID ??
+  "a0000000-0000-0000-0000-000000000001";
+
+const POLL_INTERVAL_MS = 15_000;
+
+// ─── Status Config ────────────────────────────────────────────────────────────
+
+const statusConfig: Record<string, { label: string; color: string; bg: string }> = {
+  pending:   { label: "Pending",   color: "text-amber-700",   bg: "bg-amber-100"  },
+  preparing: { label: "Preparing", color: "text-blue-700",    bg: "bg-blue-100"   },
+  ready:     { label: "Ready",     color: "text-green-700",   bg: "bg-green-100"  },
+  served:    { label: "Served",    color: "text-emerald-700", bg: "bg-emerald-100" },
+  completed: { label: "Completed", color: "text-slate-700",   bg: "bg-slate-100"  },
+  cancelled: { label: "Cancelled", color: "text-red-700",     bg: "bg-red-100"    },
 };
 
-interface OrderItem {
-  menuItemId?: string;
-  name: string;
-  price: number;
-  quantity: number;
-}
-
-interface Order {
-  id: string;
-  orderNumber: string;
-  status: string;
-  customerPhone: string;
-  total: number;
-  paymentStatus: string;
-  createdAt: any;
-  items: OrderItem[];
-}
+// ─── Page Component ───────────────────────────────────────────────────────────
 
 export default function CustomerOrdersPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [orders, setOrders]       = useState<Order[]>([]);
+  const [loading, setLoading]     = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [phone, setPhone] = useState<string | null>(null);
+  const [customerId, setCustomerId] = useState<string | null>(null);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
 
-  const resolvePhone = useCallback(async () => {
+  // ── Resolve authenticated user ────────────────────────────────────────────
+  // Uses verify-status which reads from Firestore — no localStorage fallback.
+  // customerId (UID) is the canonical identifier for fetching orders.
+
+  const resolveUser = useCallback(async () => {
     try {
-      // 1) Try auth verify API
-      const verifyRes = await fetch("/api/auth/verify-status", {
-        cache: "no-store",
-      });
+      const res  = await fetch("/api/auth/verify-status", { cache: "no-store" });
+      const data = await res.json() as {
+        authenticated: boolean;
+        user?: { uid: string };
+      };
 
-      if (verifyRes.ok) {
-        const verifyData = await verifyRes.json();
-        const apiPhone =
-          verifyData?.user?.phone ||
-          verifyData?.phone ||
-          verifyData?.customer?.phone ||
-          null;
-
-        if (apiPhone) {
-          setPhone(apiPhone);
-          return;
-        }
+      if (data.authenticated && data.user?.uid) {
+        setCustomerId(data.user.uid);
+        setIsLoggedIn(true);
+      } else {
+        setIsLoggedIn(false);
+        setLoading(false);
       }
-    } catch (err) {
-      console.error("verify-status error:", err);
-    }
-
-    try {
-      // 2) Fallback to localStorage
-      const stored = localStorage.getItem("customer-auth");
-      const parsed = stored ? JSON.parse(stored) : null;
-      setPhone(parsed?.phone ?? null);
-    } catch (err) {
-      console.error("localStorage parse error:", err);
-      setPhone(null);
+    } catch {
+      setIsLoggedIn(false);
+      setLoading(false);
     }
   }, []);
 
-  const fetchOrders = useCallback(async (customerPhone: string, silent = false) => {
+  // ── Fetch orders by customerId ────────────────────────────────────────────
+  // Server-side filter — not client-side filtering of all orders.
+
+  const fetchOrders = useCallback(async (uid: string, silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
 
     try {
-      const res = await fetch(`/api/orders?restaurantId=${RESTAURANT_ID}`, {
-        cache: "no-store",
-      });
-      const data = await res.json();
-
-      const filtered = (data.orders || []).filter(
-        (o: Order) => o.customerPhone === customerPhone
+      const res  = await fetch(
+        `/api/orders?customerId=${uid}&restaurantId=${RESTAURANT_ID}`,
+        { cache: "no-store" }
       );
-
-      filtered.sort((a: Order, b: Order) => {
-        const aTime = a.createdAt?._seconds ?? a.createdAt?.seconds ?? 0;
-        const bTime = b.createdAt?._seconds ?? b.createdAt?.seconds ?? 0;
-        return bTime - aTime;
-      });
-
-      setOrders(filtered);
+      const data = await res.json() as { orders?: Order[] };
+      setOrders(data.orders ?? []);
     } catch (err) {
       console.error("Fetch orders error:", err);
     } finally {
@@ -110,28 +85,22 @@ export default function CustomerOrdersPage() {
   }, []);
 
   useEffect(() => {
-    resolvePhone();
-  }, [resolvePhone]);
+    resolveUser();
+  }, [resolveUser]);
 
   useEffect(() => {
-    if (phone === null) {
-      setLoading(false);
-      return;
-    }
+    if (!customerId) return;
 
-    if (!phone) {
-      setLoading(false);
-      return;
-    }
-
-    fetchOrders(phone);
+    fetchOrders(customerId);
 
     const interval = setInterval(() => {
-      fetchOrders(phone, true);
-    }, 15000);
+      fetchOrders(customerId, true);
+    }, POLL_INTERVAL_MS);
 
     return () => clearInterval(interval);
-  }, [phone, fetchOrders]);
+  }, [customerId, fetchOrders]);
+
+  // ── Loading State ─────────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -148,6 +117,8 @@ export default function CustomerOrdersPage() {
 
   return (
     <div className="min-h-screen bg-[#fafafa] pb-24">
+
+      {/* Header */}
       <div className="sticky top-0 z-40 bg-white/80 backdrop-blur-xl border-b border-slate-100">
         <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -160,43 +131,42 @@ export default function CustomerOrdersPage() {
             <h1 className="text-base font-bold text-slate-900">My Orders</h1>
           </div>
 
-          {!!phone && (
+          {isLoggedIn && customerId && (
             <button
-              onClick={() => fetchOrders(phone, true)}
+              onClick={() => fetchOrders(customerId, true)}
               disabled={refreshing}
               className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center disabled:opacity-50"
             >
-              <RefreshCw
-                className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
-              />
+              <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
             </button>
           )}
         </div>
       </div>
 
       <div className="max-w-lg mx-auto px-4 pt-6 space-y-4">
-        {!phone ? (
+
+        {/* Not Logged In */}
+        {!isLoggedIn && (
           <div className="flex flex-col items-center justify-center py-16">
             <ShoppingBag className="w-16 h-16 text-slate-200 mb-4" />
-            <h2 className="text-lg font-semibold text-slate-500">
-              Please Login First
-            </h2>
+            <h2 className="text-lg font-semibold text-slate-500">Please Login First</h2>
             <p className="text-sm text-slate-400 mt-1 text-center">
               Login to view your current and past orders
             </p>
             <Link
-              href="/menu"
+              href="/login?redirect=/orders"
               className="mt-6 h-12 px-6 bg-orange-500 text-white font-semibold rounded-xl flex items-center gap-2"
             >
-              Go to Menu
+              Login
             </Link>
           </div>
-        ) : orders.length === 0 ? (
+        )}
+
+        {/* No Orders */}
+        {isLoggedIn && orders.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16">
             <ShoppingBag className="w-16 h-16 text-slate-200 mb-4" />
-            <h2 className="text-lg font-semibold text-slate-500">
-              No Orders Yet
-            </h2>
+            <h2 className="text-lg font-semibold text-slate-500">No Orders Yet</h2>
             <p className="text-sm text-slate-400 mt-1 text-center">
               Your order history will appear here
             </p>
@@ -207,60 +177,53 @@ export default function CustomerOrdersPage() {
               Browse Menu
             </Link>
           </div>
-        ) : (
-          orders.map((order, idx) => {
-            const items = Array.isArray(order.items) ? order.items : [];
-            const cfg = statusConfig[order.status] ?? statusConfig.pending;
-
-            return (
-              <motion.div
-                key={order.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: idx * 0.05 }}
-              >
-                <Link
-                  href={`/orders/${order.id}`}
-                  className="block bg-white rounded-2xl p-4 shadow-md hover:shadow-lg transition-shadow"
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-sm font-bold text-slate-900">
-                      {order.orderNumber}
-                    </h3>
-                    <span
-                      className={`px-2 py-1 rounded-full text-[10px] font-semibold ${cfg.bg} ${cfg.color}`}
-                    >
-                      {cfg.label}
-                    </span>
-                  </div>
-
-                  <p className="text-xs text-slate-400 mb-2">
-                    {formatDate(order.createdAt)}
-                  </p>
-
-                  <div className="text-xs text-slate-500 line-clamp-1 mb-3">
-                    {items.map((i) => `${i.quantity}x ${i.name}`).join(", ")}
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-                    <span className="text-sm font-bold text-slate-900">
-                      {formatCurrency(order.total)}
-                    </span>
-                    <span
-                      className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${
-                        order.paymentStatus === "paid"
-                          ? "bg-green-100 text-green-700"
-                          : "bg-amber-100 text-amber-700"
-                      }`}
-                    >
-                      {order.paymentStatus === "paid" ? "PAID" : "UNPAID"}
-                    </span>
-                  </div>
-                </Link>
-              </motion.div>
-            );
-          })
         )}
+
+        {/* Order Cards */}
+        {isLoggedIn && orders.map((order, idx) => {
+          const items = Array.isArray(order.items) ? (order.items as OrderItem[]) : [];
+          const cfg   = statusConfig[order.status ?? "pending"] ?? statusConfig.pending;
+
+          return (
+            <motion.div
+              key={order.id}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: idx * 0.05 }}
+            >
+              <Link
+                href={`/orders/${order.id}`}
+                className="block bg-white rounded-2xl p-4 shadow-md hover:shadow-lg transition-shadow"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-bold text-slate-900">{order.orderNumber}</h3>
+                  <span className={`px-2 py-1 rounded-full text-[10px] font-semibold ${cfg.bg} ${cfg.color}`}>
+                    {cfg.label}
+                  </span>
+                </div>
+
+                <p className="text-xs text-slate-400 mb-2">{formatDate(order.createdAt)}</p>
+
+                <div className="text-xs text-slate-500 line-clamp-1 mb-3">
+                  {items.map((i) => `${i.quantity}x ${i.name}`).join(", ")}
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                  <span className="text-sm font-bold text-slate-900">
+                    {formatCurrency(order.total)}
+                  </span>
+                  <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${
+                    order.paymentStatus === "paid"
+                      ? "bg-green-100 text-green-700"
+                      : "bg-amber-100 text-amber-700"
+                  }`}>
+                    {order.paymentStatus === "paid" ? "PAID" : "UNPAID"}
+                  </span>
+                </div>
+              </Link>
+            </motion.div>
+          );
+        })}
       </div>
     </div>
   );

@@ -1,14 +1,13 @@
 "use client";
 
-import { useState, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
+import { useState, Suspense }          from "react";
+import { useRouter, useSearchParams }  from "next/navigation";
+import { motion, AnimatePresence }     from "framer-motion";
 import {
   Mail, Lock, Eye, EyeOff, User, Phone,
   AlertCircle, CheckCircle, RefreshCw,
   ExternalLink, ArrowRight, UtensilsCrossed,
 } from "lucide-react";
-
 import {
   auth,
   signInWithEmailAndPassword,
@@ -19,6 +18,8 @@ import {
   googleProvider,
 } from "@/lib/firebase";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 type Step =
   | "login"
   | "signup"
@@ -27,14 +28,31 @@ type Step =
   | "collect_phone"
   | "success";
 
-// ── All logic inside this inner component ──────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function getFirebaseErrorMessage(err: unknown): string {
+  const code = (err as { code?: string })?.code ?? "";
+  if (code.includes("user-not-found") ||
+      code.includes("wrong-password")  ||
+      code.includes("invalid-credential")) {
+    return "Invalid email or password";
+  }
+  if (code.includes("too-many-requests")) return "Too many attempts. Try later.";
+  if (code.includes("user-disabled"))     return "This account has been disabled.";
+  if (code.includes("email-already-in-use")) return "Email already registered. Please login.";
+  if (code.includes("weak-password"))     return "Password too weak.";
+  return (err as { message?: string })?.message ?? "An error occurred. Please try again.";
+}
+
+// ─── Login Content ────────────────────────────────────────────────────────────
+
 function LoginContent() {
   const router       = useRouter();
   const searchParams = useSearchParams();
 
-  const redirectTo   = searchParams.get("redirect") || "";
-  const tableId      = searchParams.get("table")    || "";
-  const restaurantId = searchParams.get("r")        || "";
+  const redirectTo   = searchParams.get("redirect") ?? "";
+  const tableId      = searchParams.get("table")    ?? "";
+  const restaurantId = searchParams.get("r")        ?? "";
 
   const [step, setStep]           = useState<Step>("login");
   const [email, setEmail]         = useState("");
@@ -49,18 +67,21 @@ function LoginContent() {
   const [resetSent, setResetSent] = useState(false);
   const [userRole, setUserRole]   = useState("customer");
 
-  const buildRedirect = (role: string) => {
+  const buildRedirect = (role: string): string => {
     if (redirectTo) return redirectTo;
     if (role === "admin" || role === "super_admin") return "/admin";
     const p = new URLSearchParams();
     if (tableId)      p.set("table", tableId);
-    if (restaurantId) p.set("r", restaurantId);
+    if (restaurantId) p.set("r",     restaurantId);
     return p.toString() ? `/menu?${p.toString()}` : "/menu";
   };
 
   const goSuccess = (role: string) => {
     setStep("success");
-    setTimeout(() => { router.push(buildRedirect(role)); router.refresh(); }, 900);
+    setTimeout(() => {
+      router.push(buildRedirect(role));
+      router.refresh();
+    }, 900);
   };
 
   const handleAuthSuccess = async (idToken: string) => {
@@ -69,69 +90,93 @@ function LoginContent() {
       headers: { "Content-Type": "application/json" },
       body:    JSON.stringify({ idToken }),
     });
-    const data = await res.json();
+    const data = await res.json() as {
+      success?:   boolean;
+      needsPhone?: boolean;
+      error?:      string;
+      user?:       { uid: string; name: string; email: string; role: string };
+    };
 
     if (!res.ok) {
       if (data.error === "email_not_verified") { setStep("verify_email"); return; }
-      throw new Error(data.error || "Login failed");
+      throw new Error(data.error ?? "Login failed");
     }
 
     if (data.needsPhone === true) {
-      setName(data.user?.name   || "");
-      setEmail(data.user?.email || "");
-      setUserRole(data.user?.role || "customer");
+      setName(data.user?.name  ?? "");
+      setEmail(data.user?.email ?? "");
+      setUserRole(data.user?.role ?? "customer");
       setStep("collect_phone");
       return;
     }
 
-    goSuccess(data.user.role);
+    goSuccess(data.user?.role ?? "customer");
   };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(""); setLoading(true);
+    setError("");
+    setLoading(true);
     try {
       const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
       if (!cred.user.emailVerified) { setStep("verify_email"); return; }
       await handleAuthSuccess(await cred.user.getIdToken(true));
-    } catch (err: any) {
-      const c = err?.code || "";
-      if (c.includes("user-not-found") || c.includes("wrong-password") || c.includes("invalid-credential")) {
-        setError("Invalid email or password");
-      } else if (c.includes("too-many-requests")) {
-        setError("Too many attempts. Try later.");
-      } else { setError(err?.message || "Login failed"); }
-    } finally { setLoading(false); }
+    } catch (err: unknown) {
+      setError(getFirebaseErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleGoogle = async () => {
-    setError(""); setLoading(true);
+    setError("");
+    setLoading(true);
     try {
       const cred = await signInWithPopup(auth, googleProvider);
       await handleAuthSuccess(await cred.user.getIdToken(true));
-    } catch (err: any) {
-      if (err?.code !== "auth/popup-closed-by-user") setError(err?.message || "Google sign in failed");
-    } finally { setLoading(false); }
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code ?? "";
+      if (code !== "auth/popup-closed-by-user") {
+        setError(getFirebaseErrorMessage(err));
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(""); setLoading(true);
+    setError("");
+    setLoading(true);
     try {
-      if (password.length < 6)  { setError("Password must be at least 6 characters"); return; }
-      if (phone.length < 10)    { setError("Enter valid 10-digit phone number"); return; }
-      const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
+      if (password.length < 6) { setError("Password must be at least 6 characters"); return; }
+      if (phone.length < 10)   { setError("Enter valid 10-digit phone number"); return; }
+
+      const cred    = await createUserWithEmailAndPassword(auth, email.trim(), password);
       await sendEmailVerification(cred.user);
+
+      // Get ID token to authenticate the signup request
+      const idToken = await cred.user.getIdToken();
+
       await fetch("/api/auth/signup", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uid: cred.user.uid, email: email.trim(), name: name.trim(), phone: phone.trim() }),
+        method:  "POST",
+        headers: {
+          "Content-Type":  "application/json",
+          "Authorization": `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          email: email.trim(),
+          name:  name.trim(),
+          phone: phone.trim(),
+        }),
       });
+
       setStep("verify_email");
-    } catch (err: any) {
-      if (err?.code === "auth/email-already-in-use") setError("Email already registered. Please login.");
-      else if (err?.code === "auth/weak-password") setError("Password too weak.");
-      else setError(err?.message || "Signup failed");
-    } finally { setLoading(false); }
+    } catch (err: unknown) {
+      setError(getFirebaseErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleResend = async () => {
@@ -141,49 +186,70 @@ function LoginContent() {
       const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
       await sendEmailVerification(cred.user);
       setResent(true);
-      setTimeout(() => setResent(false), 30000);
-    } catch { setError("Failed to resend"); }
-    finally { setResending(false); }
+      setTimeout(() => setResent(false), 30_000);
+    } catch {
+      setError("Failed to resend. Please try again.");
+    } finally {
+      setResending(false);
+    }
   };
 
   const handleCheckVerified = async () => {
-    setLoading(true); setError("");
+    setLoading(true);
+    setError("");
     try {
       await auth.currentUser?.reload();
       const user = auth.currentUser;
       if (user?.emailVerified) {
         await handleAuthSuccess(await user.getIdToken(true));
-      } else { setError("Email not verified yet. Please check Gmail."); }
-    } catch { setError("Please try again."); }
-    finally { setLoading(false); }
+      } else {
+        setError("Email not verified yet. Please check your inbox.");
+      }
+    } catch {
+      setError("Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim()) { setError("Enter your email"); return; }
-    setLoading(true); setError("");
+    setLoading(true);
+    setError("");
     try {
       await sendPasswordResetEmail(auth, email.trim());
       setResetSent(true);
-    } catch (err: any) { setError(err?.message || "Failed"); }
-    finally { setLoading(false); }
+    } catch (err: unknown) {
+      setError(getFirebaseErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSavePhone = async () => {
     if (phone.length < 10) { setError("Enter valid 10-digit phone number"); return; }
-    setLoading(true); setError("");
+    setLoading(true);
+    setError("");
     try {
       const res = await fetch("/api/auth/update-profile", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ name: name.trim(), phone: phone.trim() }),
       });
-      if (res.ok) { goSuccess(userRole); }
-      else { setError("Failed to save. Try again."); }
-    } catch { setError("Network error"); }
-    finally { setLoading(false); }
+      if (res.ok) {
+        goSuccess(userRole);
+      } else {
+        setError("Failed to save. Try again.");
+      }
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
+  // ── Shared Class Strings ────────────────────────────────────────────────────
   const inp = "w-full h-12 px-8 pl-11 pr-4 rounded-2xl border-2 border-slate-200 bg-slate-50 text-sm focus:outline-none focus:border-orange-400 transition-colors placeholder:text-slate-400";
   const btn = "w-full h-12 bg-gradient-to-r from-orange-500 to-red-500 text-white font-bold rounded-2xl disabled:opacity-50 active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-lg shadow-orange-200/50";
 
@@ -233,7 +299,7 @@ function LoginContent() {
         <div className="mx-auto w-full max-w-sm">
           <AnimatePresence mode="wait">
 
-            {/* LOGIN */}
+            {/* ── LOGIN ── */}
             {step === "login" && (
               <motion.div
                 key="login"
@@ -300,7 +366,7 @@ function LoginContent() {
                         >
                           {showPass
                             ? <EyeOff className="w-4 h-4 text-slate-400" />
-                            : <Eye className="w-4 h-4 text-slate-400" />}
+                            : <Eye    className="w-4 h-4 text-slate-400" />}
                         </button>
                       </div>
                     </div>
@@ -356,7 +422,7 @@ function LoginContent() {
               </motion.div>
             )}
 
-            {/* SIGNUP */}
+            {/* ── SIGNUP ── */}
             {step === "signup" && (
               <motion.div
                 key="signup"
@@ -460,7 +526,7 @@ function LoginContent() {
                         >
                           {showPass
                             ? <EyeOff className="w-4 h-4 text-slate-400" />
-                            : <Eye className="w-4 h-4 text-slate-400" />}
+                            : <Eye    className="w-4 h-4 text-slate-400" />}
                         </button>
                       </div>
                     </div>
@@ -495,7 +561,7 @@ function LoginContent() {
               </motion.div>
             )}
 
-            {/* COLLECT PHONE */}
+            {/* ── COLLECT PHONE ── */}
             {step === "collect_phone" && (
               <motion.div
                 key="collect_phone"
@@ -574,7 +640,7 @@ function LoginContent() {
               </motion.div>
             )}
 
-            {/* EMAIL VERIFICATION */}
+            {/* ── EMAIL VERIFICATION ── */}
             {step === "verify_email" && (
               <motion.div
                 key="verify"
@@ -646,7 +712,7 @@ function LoginContent() {
               </motion.div>
             )}
 
-            {/* FORGOT PASSWORD */}
+            {/* ── FORGOT PASSWORD ── */}
             {step === "forgot_password" && (
               <motion.div
                 key="forgot"
@@ -725,7 +791,7 @@ function LoginContent() {
               </motion.div>
             )}
 
-            {/* SUCCESS */}
+            {/* ── SUCCESS ── */}
             {step === "success" && (
               <motion.div
                 key="success"
@@ -754,7 +820,9 @@ function LoginContent() {
   );
 }
 
-// ── Suspense wrapper — fixes useSearchParams build error ───────────────────────
+// ─── Suspense Wrapper ─────────────────────────────────────────────────────────
+// Required for useSearchParams() in Next.js App Router
+
 export default function LoginPage() {
   return (
     <Suspense

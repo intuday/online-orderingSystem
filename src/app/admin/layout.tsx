@@ -1,21 +1,24 @@
+// src/app/admin/layout.tsx
 "use client";
 
 import { useState, useEffect, type ReactNode } from "react";
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
+import Link                                     from "next/link";
+import { usePathname, useRouter }               from "next/navigation";
+import { motion, AnimatePresence }              from "framer-motion";
 import {
   LayoutDashboard, ShoppingBag, UtensilsCrossed, Grid3X3,
   Ticket, Users, BarChart3, Settings, Menu, X,
-  ChevronRight, ImageIcon, LogOut,
+  ChevronRight, ImageIcon, LogOut, TableProperties,
 } from "lucide-react";
 
+// ─── Navigation Config ────────────────────────────────────────────────────────
+
 const navItems = [
-  { href: "/admin",            label: "Dashboard",   icon: LayoutDashboard, exact: true },
+  { href: "/admin",            label: "Dashboard",   icon: LayoutDashboard,  exact: true },
   { href: "/admin/orders",     label: "Orders",      icon: ShoppingBag },
   { href: "/admin/menu",       label: "Menu Items",  icon: UtensilsCrossed },
   { href: "/admin/categories", label: "Categories",  icon: Grid3X3 },
-  { href: "/admin/tables",     label: "Tables & QR", icon: Grid3X3 },
+  { href: "/admin/tables",     label: "Tables & QR", icon: TableProperties },
   { href: "/admin/offers",     label: "Offers",      icon: ImageIcon },
   { href: "/admin/coupons",    label: "Coupons",     icon: Ticket },
   { href: "/admin/customers",  label: "Customers",   icon: Users },
@@ -23,12 +26,16 @@ const navItems = [
   { href: "/admin/settings",   label: "Settings",    icon: Settings },
 ];
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 interface AdminUser {
   email:        string;
   role:         string;
   name:         string;
   restaurantId: string;
 }
+
+// ─── Layout ───────────────────────────────────────────────────────────────────
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -48,38 +55,41 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       return;
     }
 
-    // ✅ Cookie-based auth verify karo
     fetch("/api/auth/verify-status")
-  .then((res) => res.json())
-  .then((data) => {
-    if (data.authenticated && (data.user.role === "admin" || data.user.role === "super_admin")) {
-      setAdminUser({
-        email:        data.user.email,
-        role:         data.user.role,
-        name:         data.user.name || data.user.email,
-        restaurantId: data.user.restaurantId,
-      });
-      setVerified(true);
-    } else {
-      router.replace("/login?redirect=/admin");
-    }
-  })
-  .catch(() => router.replace("/login?redirect=/admin"))
-  .finally(() => setChecking(false));
+      .then((res) => res.json())
+      .then((data) => {
+        if (
+          data.authenticated &&
+          (data.user.role === "admin" || data.user.role === "super_admin")
+        ) {
+          setAdminUser({
+            email:        data.user.email        ?? "",
+            role:         data.user.role         ?? "admin",
+            name:         data.user.name         || data.user.email || "Admin",
+            restaurantId: data.user.restaurantId ?? "",
+          });
+          setVerified(true);
+        } else {
+          router.replace("/login?redirect=/admin");
+        }
+      })
+      .catch(() => router.replace("/login?redirect=/admin"))
+      .finally(() => setChecking(false));
 
   }, [isLoginPage, router]);
 
   const handleLogout = async () => {
-  try {
-    const { auth, signOut } = await import("@/lib/firebase");
-    await signOut(auth);
-    await fetch("/api/auth/logout", { method: "POST" }); // ✅ /logout not /admin-logout
-    router.replace("/login");
-    router.refresh();
-  } catch {
-    router.replace("/login");
-  }
-};
+    try {
+      const { auth, signOut } = await import("@/lib/firebase");
+      await signOut(auth);
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // Ignore — proceed with redirect regardless
+    } finally {
+      router.replace("/login");
+      router.refresh();
+    }
+  };
 
   if (checking) {
     return (
@@ -93,12 +103,12 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   }
 
   if (!verified) return null;
-
   if (isLoginPage) return <>{children}</>;
 
   return (
     <div className="min-h-screen bg-[#f8f9fb]">
-      {/* Mobile Header */}
+
+      {/* ── Mobile Header ── */}
       <header className="lg:hidden sticky top-0 z-50 h-14 bg-white border-b border-slate-200 flex items-center px-4 gap-3">
         <button
           onClick={() => setSidebarOpen(true)}
@@ -116,7 +126,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         </button>
       </header>
 
-      {/* Mobile Sidebar */}
+      {/* ── Mobile Sidebar ── */}
       <AnimatePresence>
         {sidebarOpen && (
           <motion.div
@@ -145,7 +155,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         )}
       </AnimatePresence>
 
-      {/* Desktop Sidebar */}
+      {/* ── Desktop Sidebar ── */}
       <aside className="hidden lg:block fixed left-0 top-0 bottom-0 w-64 bg-white border-r border-slate-200 overflow-y-auto z-40">
         <SidebarContent
           pathname={pathname}
@@ -154,7 +164,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         />
       </aside>
 
-      {/* Main Content */}
+      {/* ── Main Content ── */}
       <main className="lg:ml-64 min-h-screen">
         <div className="max-w-7xl mx-auto p-4 lg:p-8">
           {children}
@@ -164,16 +174,26 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   );
 }
 
+// ─── Sidebar Content ──────────────────────────────────────────────────────────
+
 function SidebarContent({
-  pathname, adminUser, onClose, onLogout,
+  pathname,
+  adminUser,
+  onClose,
+  onLogout,
 }: {
-  pathname:   string;
-  adminUser:  AdminUser | null;
-  onClose?:   () => void;
-  onLogout:   () => void;
+  pathname:  string;
+  adminUser: AdminUser | null;
+  onClose?:  () => void;
+  onLogout:  () => void;
 }) {
+  const restaurantName = adminUser?.restaurantId
+    ? "Admin Panel"
+    : "Admin Panel";
+
   return (
     <div className="flex flex-col h-full">
+
       {/* Logo */}
       <div className="p-5 flex items-center justify-between border-b border-slate-100">
         <div className="flex items-center gap-3">
@@ -181,12 +201,17 @@ function SidebarContent({
             <UtensilsCrossed className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h2 className="text-sm font-bold text-slate-900">Royal Kitchen</h2>
-            <p className="text-[10px] text-slate-400 capitalize">{adminUser?.role || "Admin"} Panel</p>
+            <h2 className="text-sm font-bold text-slate-900">{restaurantName}</h2>
+            <p className="text-[10px] text-slate-400 capitalize">
+              {adminUser?.role ?? "Admin"} Panel
+            </p>
           </div>
         </div>
         {onClose && (
-          <button onClick={onClose} className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center lg:hidden">
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center lg:hidden"
+          >
             <X className="w-4 h-4" />
           </button>
         )}

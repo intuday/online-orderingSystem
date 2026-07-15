@@ -1,43 +1,53 @@
 // src/lib/firebase-admin.ts
+// Firebase ADMIN SDK initialization — server-side only.
+// All domain types live in @/lib/types — not here.
+
 import { initializeApp, getApps, cert, type ServiceAccount } from "firebase-admin/app";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
-import { getAuth } from "firebase-admin/auth";
+import { getFirestore, FieldValue }                           from "firebase-admin/firestore";
+import { getAuth }                                            from "firebase-admin/auth";
 
 // ── Private Key Parser ────────────────────────────────────────────────────────
+
 function parsePrivateKey(raw: string | undefined): string {
   if (!raw) {
-    throw new Error("❌ FIREBASE_PRIVATE_KEY is missing from environment variables");
+    throw new Error(
+      "[Firebase Admin] FIREBASE_PRIVATE_KEY is missing from environment variables"
+    );
   }
 
   let key = raw;
 
-  // Step 1: Remove surrounding quotes if present (common .env issue)
-  if ((key.startsWith('"') && key.endsWith('"')) || 
-      (key.startsWith("'") && key.endsWith("'"))) {
+  // Remove surrounding quotes if present (common .env issue)
+  if (
+    (key.startsWith('"') && key.endsWith('"')) ||
+    (key.startsWith("'") && key.endsWith("'"))
+  ) {
     key = key.slice(1, -1);
   }
 
-  // Step 2: Replace escaped newlines with real newlines
+  // Replace escaped newlines with real newlines
   key = key.replace(/\\n/g, "\n");
 
-  // Step 3: Validate the key format
   if (!key.includes("-----BEGIN PRIVATE KEY-----")) {
     throw new Error(
-      "❌ FIREBASE_PRIVATE_KEY is invalid. Must start with '-----BEGIN PRIVATE KEY-----'"
+      "[Firebase Admin] FIREBASE_PRIVATE_KEY is invalid. " +
+      "Must start with '-----BEGIN PRIVATE KEY-----'"
     );
   }
 
   if (!key.includes("-----END PRIVATE KEY-----")) {
     throw new Error(
-      "❌ FIREBASE_PRIVATE_KEY is invalid. Must end with '-----END PRIVATE KEY-----'"
+      "[Firebase Admin] FIREBASE_PRIVATE_KEY is invalid. " +
+      "Must end with '-----END PRIVATE KEY-----'"
     );
   }
 
   return key;
 }
 
-// ── Validate all required env vars ───────────────────────────────────────────
-function validateEnvVars() {
+// ── Environment Variable Validation ──────────────────────────────────────────
+
+function validateEnvVars(): void {
   const missing: string[] = [];
 
   if (!process.env.FIREBASE_PROJECT_ID)   missing.push("FIREBASE_PROJECT_ID");
@@ -45,25 +55,24 @@ function validateEnvVars() {
   if (!process.env.FIREBASE_PRIVATE_KEY)  missing.push("FIREBASE_PRIVATE_KEY");
 
   if (missing.length > 0) {
-    throw new Error(`❌ Missing Firebase env vars: ${missing.join(", ")}`);
+    throw new Error(
+      `[Firebase Admin] Missing required environment variables:\n${missing.join("\n")}`
+    );
   }
 }
 
-// ── Initialize Firebase Admin ─────────────────────────────────────────────────
+// ── App Initialization ────────────────────────────────────────────────────────
+
 function initializeAdminApp() {
-  if (getApps().length > 0) {
-    return getApps()[0];
-  }
+  if (getApps().length > 0) return getApps()[0];
 
   validateEnvVars();
-
-  const privateKey = parsePrivateKey(process.env.FIREBASE_PRIVATE_KEY);
 
   return initializeApp({
     credential: cert({
       projectId:   process.env.FIREBASE_PROJECT_ID,
       clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey,
+      privateKey:  parsePrivateKey(process.env.FIREBASE_PRIVATE_KEY),
     }),
   });
 }
@@ -74,7 +83,8 @@ export const db        = getFirestore(adminApp);
 export const adminAuth = getAuth(adminApp);
 export const FieldVal  = FieldValue;
 
-// ── Constraint types ──────────────────────────────────────────────────────────
+// ── Constraint Types ──────────────────────────────────────────────────────────
+
 type WhereConstraint = {
   __type: "where";
   field:  string;
@@ -95,7 +105,8 @@ type LimitConstraint = {
 
 type QueryConstraint = WhereConstraint | OrderByConstraint | LimitConstraint;
 
-// ── Collection / Doc helpers ──────────────────────────────────────────────────
+// ── Collection / Document Helpers ─────────────────────────────────────────────
+
 export function collection(
   database: FirebaseFirestore.Firestore,
   ...pathSegments: string[]
@@ -110,7 +121,8 @@ export function doc(
   return database.doc(pathSegments.join("/"));
 }
 
-// ── Read helpers ──────────────────────────────────────────────────────────────
+// ── Read Helpers ──────────────────────────────────────────────────────────────
+
 export async function getDocs(
   ref: FirebaseFirestore.CollectionReference | FirebaseFirestore.Query
 ) {
@@ -132,7 +144,8 @@ export async function getDoc(ref: FirebaseFirestore.DocumentReference) {
   };
 }
 
-// ── Query builder helpers ─────────────────────────────────────────────────────
+// ── Query Builder ─────────────────────────────────────────────────────────────
+
 export function where(
   field: string,
   op:    FirebaseFirestore.WhereFilterOp,
@@ -173,7 +186,8 @@ export function query(
   return q;
 }
 
-// ── Write helpers ─────────────────────────────────────────────────────────────
+// ── Write Helpers ─────────────────────────────────────────────────────────────
+
 export async function setDoc(
   ref:      FirebaseFirestore.DocumentReference,
   data:     Record<string, unknown>,
@@ -187,8 +201,7 @@ export async function addDoc(
   ref:  FirebaseFirestore.CollectionReference,
   data: Record<string, unknown>
 ) {
-  const docRef = await ref.add(data);
-  return docRef;
+  return ref.add(data);
 }
 
 export async function updateDoc(
@@ -202,109 +215,13 @@ export async function deleteDoc(ref: FirebaseFirestore.DocumentReference) {
   await ref.delete();
 }
 
-// ── FieldValue helpers ────────────────────────────────────────────────────────
+// ── FieldValue Helpers ────────────────────────────────────────────────────────
+
 export const serverTimestamp = () => FieldValue.serverTimestamp();
 export const increment       = (n: number) => FieldValue.increment(n);
 export const arrayUnion      = (...items: unknown[]) => FieldValue.arrayUnion(...items);
 export const arrayRemove     = (...items: unknown[]) => FieldValue.arrayRemove(...items);
 
-// ── Type exports ──────────────────────────────────────────────────────────────
+// ── Type Exports ──────────────────────────────────────────────────────────────
+
 export type { ServiceAccount };
-
-// ── Shared Types ──────────────────────────────────────────────────────────────
-export interface MenuItem {
-  id:              string;
-  categoryId:      string;
-  name:            string;
-  description?:    string;
-  price:           number;
-  comparePrice?:   number;
-  image?:          string;
-  isVeg?:          boolean;
-  isAvailable?:    boolean;
-  isRecommended?:  boolean;
-  isPopular?:      boolean;
-  isTodaySpecial?: boolean;
-  isFeatured?:     boolean;
-  spiceLevel?:     number;
-  rating?:         number;
-  reviewCount?:    number;
-  orderCount?:     number;
-  prepTime?:       number;
-  calories?:       number;
-  sortOrder?:      number;
-  variants?:       unknown[];
-  addons?:         unknown[];
-  allergens?:      unknown[];
-  ingredients?:    unknown[];
-  restaurantId?:   string;
-  slug?:           string;
-  createdAt?:      unknown;
-  updatedAt?:      unknown;
-}
-
-export interface Table {
-  id:           string;
-  number:       number;
-  name:         string;
-  capacity:     number;
-  status:       string;
-  qrCode?:      string;
-  restaurantId: string;
-}
-
-export interface Offer {
-  id:            string;
-  restaurantId?: string;
-  title:         string;
-  description?:  string;
-  image?:        string;
-  discountType:  string;
-  discountValue: number;
-  isActive?:     boolean;
-  validFrom?:    unknown;
-  validTo?:      unknown;
-  createdAt?:    unknown;
-}
-
-// ── Merged & Deduplicated Interfaces ─────────────────────────────────────────
-export interface Coupon {
-  id:             string;
-  code:           string;
-  description?:   string;
-  discountType:   "percentage" | "flat";
-  discountValue:  number;
-  minOrder?:      number;
-  minOrderValue?: number;
-  maxDiscount?:   number;
-  isActive?:      boolean;
-  usageLimit?:    number;
-  usageCount?:    number;
-  usedCount?:     number;
-  expiresAt?:     unknown;
-  createdAt?:     unknown;
-}
-
-export interface Restaurant {
-  id:            string;
-  name:          string;
-  logo?:         string;
-  description?:  string;
-  address?:      string;
-  phone?:        string;
-  email?:        string;
-  currency?:     string;
-  taxRate?:      number;
-  gstRate?:      number;
-  gstNumber?:    string;
-  isOpen?:       boolean;
-  paymentMode?:  string;
-  openingHours?: Record<string, unknown> | string | unknown;
-  theme?:        string | Record<string, unknown>;
-  upiId?:        string;
-  acceptCash?:   boolean;
-  acceptCard?:   boolean;
-  updatedAt?:    unknown;
-  createdAt?:    unknown;
-  [key: string]: unknown;
-}

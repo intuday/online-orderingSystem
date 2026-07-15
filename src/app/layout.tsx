@@ -1,44 +1,48 @@
 // src/app/layout.tsx
 import type { Metadata, Viewport } from "next";
-import type { ReactNode } from "react";
-import { AuthProvider } from "@/contexts/AuthContext";
-import { RestaurantProvider } from "@/contexts/RestaurantContext";
-import { BottomNav } from "@/components/BottomNav";
+import type { ReactNode }          from "react";
+import { Inter }                   from "next/font/google";
+import { AuthProvider }            from "@/contexts/AuthContext";
+import { RestaurantProvider }      from "@/contexts/RestaurantContext";
+import { BottomNav }               from "@/components/BottomNav";
 import "./globals.css";
 
+// ─── Font ─────────────────────────────────────────────────────────────────────
+// next/font/google self-hosts the font — no external network request at runtime.
+// Eliminates render-blocking external font link and layout shift.
+
+const inter = Inter({
+  subsets:  ["latin"],
+  weight:   ["400", "500", "600", "700", "800"],
+  display:  "swap",
+  variable: "--font-inter",
+});
+
+// ─── Metadata ─────────────────────────────────────────────────────────────────
+
 export const metadata: Metadata = {
-  title: "The Royal Kitchen - Premium Dining",
+  title:       "The Royal Kitchen - Premium Dining",
   description: "Scan, Order & Enjoy. Premium restaurant ordering experience.",
-  manifest: "/manifest.json",
-  icons: { icon: "/icon.svg" },
+  manifest:    "/manifest.json",
+  icons:       { icon: "/icon.svg" },
 };
 
 export const viewport: Viewport = {
-  width: "device-width",
+  width:        "device-width",
   initialScale: 1,
   maximumScale: 1,
-  themeColor: "#f97316",
+  themeColor:   "#f97316",
 };
+
+// ─── Root Layout ──────────────────────────────────────────────────────────────
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
-          rel="stylesheet"
-        />
-      </head>
-      <body
-        className="bg-[#fafafa] text-slate-900 antialiased"
-        style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}
-      >
+    <html lang="en" className={inter.variable} suppressHydrationWarning>
+      <body className="bg-[#fafafa] text-slate-900 antialiased font-sans">
         <AuthProvider>
           <RestaurantProvider>
             {children}
-            {/* ✅ BottomNav component ke andar hi check hoga */}
             <BottomNav />
           </RestaurantProvider>
         </AuthProvider>

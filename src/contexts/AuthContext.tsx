@@ -11,8 +11,8 @@ import {
   type ReactNode,
 } from "react";
 import type { ConfirmationResult } from "firebase/auth";
+import type { UserProfile }        from "@/lib/types";
 
-// ✅ Sirf Auth imports - db, doc, getDoc kuch nahi
 import {
   auth,
   googleProvider,
@@ -22,7 +22,6 @@ import {
   signOut,
   onAuthStateChanged,
   type User,
-  type UserProfile,
 } from "@/lib/firebase";
 
 interface AuthContextType {
@@ -64,9 +63,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const token = await firebaseUser.getIdToken();
 
       const res = await fetch("/api/auth/profile", {
-        method: "POST",
+        method:  "POST",
         headers: {
-          "Content-Type": "application/json",
+          "Content-Type":  "application/json",
           "Authorization": `Bearer ${token}`,
         },
         body: JSON.stringify({
@@ -140,7 +139,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         recaptchaRef.current = null;
         throw err;
       }
-    }, []
+    },
+    []
   );
 
   const verifyOtp = useCallback(
@@ -153,7 +153,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (isMounted.current) setError(msg);
         throw err;
       }
-    }, []
+    },
+    []
   );
 
   const logout = useCallback(async () => {

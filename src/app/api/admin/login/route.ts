@@ -1,95 +1,162 @@
-import { NextRequest, NextResponse } from "next/server";
-import { sign } from "jsonwebtoken";
-import {
-  adminAuth, db, doc, getDoc,
-  collection, getDocs, query, where, serverTimestamp,
-} from "@/lib/firebase-admin";
+// src/app/api/admin/login/route.ts
+//
+// Admin login — verifies Firebase ID token, checks admin role,
+// stores Firebase ID token in auth-token cookie.
+// Identical behavior to /api/auth/admin-login.
+// Consider consolidating these two routes in a future cleanup.
 
-const JWT_SECRET    = process.env.JWT_SECRET || "restaurant-saas-super-secret-jwt-key-2024";
-const RESTAURANT_ID = process.env.NEXT_PUBLIC_RESTAURANT_ID || "a0000000-0000-0000-0000-000000000001";
+import { NextRequest, NextResponse }  from "next/server";
+import type { DecodedIdToken }        from "firebase-admin/auth";
+import {
+  adminAuth, db,
+  doc, getDoc, setDoc,
+  collection, getDocs,
+  query, where,
+  serverTimestamp,
+}                                     from "@/lib/firebase-admin";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const RESTAURANT_ID =
+  process.env.NEXT_PUBLIC_RESTAURANT_ID ??
+  "a0000000-0000-0000-0000-000000000001";
+
+const COOKIE_MAX_AGE = 60 * 60; // 1 hour — matches Firebase ID token expiry
+
+const ADMIN_ROLES = new Set(["admin", "super_admin"]);
+
+// ─── Route Handler ────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
   try {
-    const { idToken } = await req.json();
+    const body    = await req.json() as Record<string, unknown>;
+    const idToken = typeof body.idToken === "string" ? body.idToken : null;
 
     if (!idToken) {
-      return NextResponse.json({ error: "Token required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Firebase ID token is required" },
+        { status: 400 }
+      );
     }
 
-    let decodedToken: any;
+    // ── Verify Firebase ID Token ────────────────────────────────────────────
+
+    let decoded: DecodedIdToken;
     try {
-      decodedToken = await adminAuth.verifyIdToken(idToken);
+      decoded = await adminAuth.verifyIdToken(idToken);
     } catch {
-      return NextResponse.json({ error: "Invalid token" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Invalid or expired token" },
+        { status: 401 }
+      );
     }
 
-    const uid           = (decodedToken.uid            || "") as string;
-    const email         = (decodedToken.email          || "") as string;
-    const emailVerified = decodedToken.email_verified as boolean;
+    const uid           = decoded.uid;
+    const email         = decoded.email          ?? "";
+    const emailVerified = decoded.email_verified ?? false;
+
+    // ── Email Verification ──────────────────────────────────────────────────
 
     if (!emailVerified) {
-      return NextResponse.json({
-        error: "email_not_verified",
-        message: "Please verify your email first.",
-        email,
-      }, { status: 403 });
+      return NextResponse.json(
+        {
+          error:   "email_not_verified",
+          message: "Please verify your email before logging in.",
+          email,
+        },
+        { status: 403 }
+      );
     }
+
+    // ── Resolve Admin Profile ───────────────────────────────────────────────
 
     let role         = "admin";
     let restaurantId = RESTAURANT_ID;
     let name         = email.split("@")[0] || "Admin";
 
-    // ✅ users collection check with null guard
     const userRef  = doc(db, "users", uid);
     const userSnap = await getDoc(userRef);
 
     if (userSnap.exists()) {
-      const d = userSnap.data() || {};
-      role         = (d["role"]         as string) || "admin";
-      restaurantId = (d["restaurantId"] as string) || RESTAURANT_ID;
-      name         = (d["name"]         as string) || (d["displayName"] as string) || name;
+      const d      = userSnap.data() ?? {};
+      role         = (d.role         as string) || "admin";
+      restaurantId = (d.restaurantId as string) || RESTAURANT_ID;
+      name         = (d.name         as string)
+                  || (d.displayName  as string)
+                  || name;
 
-      if (role !== "admin" && role !== "super_admin") {
-        return NextResponse.json({ error: "Access denied." }, { status: 403 });
+      if (!ADMIN_ROLES.has(role)) {
+        return NextResponse.json(
+          { error: "Access denied. Admin privileges required." },
+          { status: 403 }
+        );
       }
+
+      // Update last login
+      await setDoc(
+        userRef,
+        { lastLoginAt: serverTimestamp(), updatedAt: serverTimestamp() },
+        { merge: true }
+      );
+
     } else {
-      // ✅ admins collection check
-      const adminQ    = query(collection(db, "admins"), where("email", "==", email));
-      const adminSnap = await getDocs(adminQ);
+      // ── Legacy: check admins collection ──────────────────────────────────
+      // TODO: Remove after admin migration is complete.
+
+      const adminSnap = await getDocs(
+        query(collection(db, "admins"), where("email", "==", email))
+      );
 
       if (!adminSnap.empty) {
-        const ad = adminSnap.docs[0].data() || {};
-        role         = (ad["role"]         as string) || "admin";
-        restaurantId = (ad["restaurantId"] as string) || RESTAURANT_ID;
-        name         = (ad["name"]         as string) || name;
+        const d      = adminSnap.docs[0].data();
+        role         = (d.role         as string) || "admin";
+        restaurantId = (d.restaurantId as string) || RESTAURANT_ID;
+        name         = (d.name         as string) || name;
       }
 
-      // ✅ users mein save karo
-      await userRef.set({
-        uid, email, name, role, restaurantId,
-        emailVerified: true,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+      // Verify role before creating document
+      if (!ADMIN_ROLES.has(role)) {
+        return NextResponse.json(
+          { error: "Access denied. Admin privileges required." },
+          { status: 403 }
+        );
+      }
+
+      await setDoc(userRef, {
+        uid,
+        email,
+        name,
+        role,
+        restaurantId,
+        emailVerified:  true,
+        totalOrders:    0,
+        totalSpent:     0,
+        createdAt:      serverTimestamp(),
+        updatedAt:      serverTimestamp(),
+        lastLoginAt:    serverTimestamp(),
       });
     }
 
-    const token = sign(
-      { uid, email, role, restaurantId, name },
-      JWT_SECRET,
-      { expiresIn: "7d" }
-    );
+    // ── Store Firebase ID Token in Cookie ───────────────────────────────────
 
-    const response = NextResponse.json({ success: true, email, role, name, restaurantId });
+    const response = NextResponse.json({
+      success:      true,
+      email,
+      role,
+      name,
+      restaurantId,
+    });
 
-    response.cookies.set("admin-token", token, {
+    response.cookies.set("auth-token", idToken, {
       httpOnly: true,
       secure:   process.env.NODE_ENV === "production",
       sameSite: "lax",
-      maxAge:   60 * 60 * 24 * 7,
+      maxAge:   COOKIE_MAX_AGE,
       path:     "/",
     });
 
     return response;
+
   } catch (error) {
     console.error("Admin login error:", error);
     return NextResponse.json({ error: "Login failed" }, { status: 500 });

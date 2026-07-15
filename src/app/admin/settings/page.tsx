@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { Save, Store, Receipt, CreditCard, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { Restaurant } from "@/lib/firebase";
+import type { Restaurant } from "@/lib/types";
 
 export default function SettingsPage() {
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null);

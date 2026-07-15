@@ -1,8 +1,9 @@
+// src/app/page.tsx
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
+import { useEffect }       from "react";
+import { useRouter }       from "next/navigation";
+import { motion }          from "framer-motion";
 import { UtensilsCrossed } from "lucide-react";
 
 export default function HomePage() {
@@ -30,6 +31,7 @@ export default function HomePage() {
         >
           <UtensilsCrossed className="w-12 h-12 text-orange-500" />
         </motion.div>
+
         <motion.h1
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -38,6 +40,7 @@ export default function HomePage() {
         >
           The Royal Kitchen
         </motion.h1>
+
         <motion.p
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -46,13 +49,15 @@ export default function HomePage() {
         >
           Premium Dining Experience
         </motion.p>
+
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.5 }}
           className="mt-8"
         >
-          <div className="w-8 h-8 border-3 border-white border-t-transparent rounded-full animate-spin mx-auto" />
+          {/* border-[3px] — border-3 is not a valid Tailwind class */}
+          <div className="w-8 h-8 border-[3px] border-white border-t-transparent rounded-full animate-spin mx-auto" />
         </motion.div>
       </motion.div>
     </div>

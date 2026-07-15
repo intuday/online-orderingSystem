@@ -1,13 +1,17 @@
 // src/lib/types/offers.ts
 
+import type { Timestamp } from "firebase/firestore";
+import type { DiscountType } from "./coupon";
+
+// Re-export so existing imports from this file continue to work
+export type { DiscountType };
+
 export type OfferType =
   | "combo"
   | "bxgy"
   | "free_item"
   | "category_deal"
   | "discount";
-
-export type DiscountType = "percentage" | "flat";
 
 export interface OfferCondition {
   requiredItemIds?:     string[];
@@ -35,6 +39,9 @@ export interface ComboItem {
   isVeg?:        boolean;
 }
 
+// ─── OfferRule ────────────────────────────────────────────────────────────────
+// Full engine rule stored in Firestore — used by offer-engine store.
+
 export interface OfferRule {
   id:               string;
   restaurantId:     string;
@@ -51,20 +58,38 @@ export interface OfferRule {
   maxUsagePerOrder: number;
   validFrom?:       string | null;
   validTo?:         string | null;
-  discountType?:    string;
+  discountType?:    DiscountType;
   discountValue?:   number;
-  createdAt?:       unknown;
-  updatedAt?:       unknown;
+  createdAt?:       Timestamp | null;
+  updatedAt?:       Timestamp | null;
 }
 
-// ✅ uid BILKUL NAHI - remove kiya
+// ─── Offer ────────────────────────────────────────────────────────────────────
+// Lightweight display offer shown in carousel, offer modal, and offer lists.
+// Distinct from OfferRule — this is the simplified API response shape.
+
+export interface Offer {
+  id:            string;
+  restaurantId?: string;
+  title:         string;
+  description?:  string;
+  image?:        string;
+  discountType:  string;
+  discountValue: number;
+  isActive?:     boolean;
+  validFrom?:    Timestamp | null;
+  validTo?:      Timestamp | null;
+  createdAt?:    Timestamp | null;
+}
+
+// ─── Reward & Promo ───────────────────────────────────────────────────────────
+
 export interface UnlockedOffer {
   offer:          OfferRule;
   isClaimed:      boolean;
   claimedItemId?: string;
 }
 
-// ✅ uid BILKUL NAHI - remove kiya
 export interface PromotionalCartItem {
   menuItemId:    string;
   name:          string;

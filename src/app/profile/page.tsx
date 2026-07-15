@@ -1,16 +1,26 @@
+// src/app/profile/page.tsx
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { useRouter } from "next/navigation";
+import { motion, AnimatePresence }          from "framer-motion";
+import { useRouter }                        from "next/navigation";
 import {
   ArrowLeft, LogOut, ShoppingBag, Clock,
   ChevronRight, Star, Package, CheckCircle,
   XCircle, ChefHat, Sparkles, Phone, Mail,
   IndianRupee, QrCode, Edit2, Save, X,
 } from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
-import { auth, signOut } from "@/lib/firebase";
+import { formatCurrency }   from "@/lib/utils";
+import { auth, signOut }    from "@/lib/firebase";
+import type { Order, OrderItem } from "@/lib/types";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const RESTAURANT_ID =
+  process.env.NEXT_PUBLIC_RESTAURANT_ID ??
+  "a0000000-0000-0000-0000-000000000001";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface UserData {
   uid:         string;
@@ -22,39 +32,43 @@ interface UserData {
   totalSpent:  number;
 }
 
-interface Order {
-  id:          string;
-  orderNumber: string;
-  total:       number;
-  status:      string;
-  createdAt:   any;
-  items:       any[];
-  tableId?:    string;
-}
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getTimestamp(ts: any): number {
-  if (!ts) return 0;
-  if (ts._seconds) return ts._seconds * 1000;
-  if (ts.seconds)  return ts.seconds  * 1000;
-  if (typeof ts === "string") return new Date(ts).getTime();
+function extractMs(value: unknown): number {
+  if (!value) return 0;
+  if (typeof value === "string") return new Date(value).getTime();
+  if (typeof value === "object" && value !== null) {
+    const v = value as Record<string, unknown>;
+    if (typeof v._seconds === "number") return v._seconds * 1000;
+    if (typeof v.seconds  === "number") return v.seconds  * 1000;
+  }
   return 0;
 }
 
-function timeAgo(ts: any): string {
-  const ms   = getTimestamp(ts);
+function timeAgo(value: unknown): string {
+  const ms = extractMs(value);
   if (!ms) return "—";
   const diff  = Date.now() - ms;
-  const mins  = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
-  const days  = Math.floor(diff / 86400000);
+  const mins  = Math.floor(diff / 60_000);
+  const hours = Math.floor(diff / 3_600_000);
+  const days  = Math.floor(diff / 86_400_000);
   if (mins  <  1) return "Just now";
   if (mins  < 60) return `${mins}m ago`;
   if (hours < 24) return `${hours}h ago`;
   if (days  <  7) return `${days}d ago`;
-  return new Date(ms).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  return new Date(ms).toLocaleDateString("en-IN", {
+    day: "numeric", month: "short", year: "numeric",
+  });
 }
 
-const statusConfig: Record<string, { color: string; bg: string; icon: any; label: string }> = {
+// ─── Status Config ────────────────────────────────────────────────────────────
+
+const statusConfig: Record<string, {
+  color: string;
+  bg:    string;
+  icon:  React.ComponentType<{ className?: string }>;
+  label: string;
+}> = {
   pending:   { color: "text-amber-700",   bg: "bg-amber-50 border-amber-200",     icon: Clock,       label: "Pending" },
   preparing: { color: "text-blue-700",    bg: "bg-blue-50 border-blue-200",       icon: ChefHat,     label: "Preparing" },
   ready:     { color: "text-green-700",   bg: "bg-green-50 border-green-200",     icon: CheckCircle, label: "Ready" },
@@ -62,6 +76,8 @@ const statusConfig: Record<string, { color: string; bg: string; icon: any; label
   completed: { color: "text-slate-600",   bg: "bg-slate-50 border-slate-200",     icon: Package,     label: "Completed" },
   cancelled: { color: "text-red-600",     bg: "bg-red-50 border-red-200",         icon: XCircle,     label: "Cancelled" },
 };
+
+// ─── Page Component ───────────────────────────────────────────────────────────
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -81,37 +97,48 @@ export default function ProfilePage() {
   const fetchData = useCallback(async () => {
     try {
       const authRes  = await fetch("/api/auth/verify-status");
-      const authData = await authRes.json();
+      const authData = await authRes.json() as {
+        authenticated: boolean;
+        user?: {
+          uid:   string;
+          name:  string;
+          email: string;
+          phone: string;
+          role:  string;
+        };
+      };
 
-      if (!authData.authenticated) {
+      if (!authData.authenticated || !authData.user) {
         router.replace("/login?redirect=/profile");
         return;
       }
 
       const u = authData.user;
       setUser({
-        uid:         u.uid   || "",
-        name:        u.name  || "User",
-        email:       u.email || "",
-        phone:       u.phone || "",
-        role:        u.role  || "customer",
+        uid:         u.uid   ?? "",
+        name:        u.name  ?? "User",
+        email:       u.email ?? "",
+        phone:       u.phone ?? "",
+        role:        u.role  ?? "customer",
         totalOrders: 0,
         totalSpent:  0,
       });
-      setEditName(u.name   || "");
-      setEditPhone(u.phone || "");
+      setEditName(u.name  ?? "");
+      setEditPhone(u.phone ?? "");
 
       const ordersRes  = await fetch(
-        `/api/orders?customerId=${u.uid}&restaurantId=${process.env.NEXT_PUBLIC_RESTAURANT_ID || "a0000000-0000-0000-0000-000000000001"}`
+        `/api/orders?customerId=${u.uid}&restaurantId=${RESTAURANT_ID}`
       );
-      const ordersData = await ordersRes.json();
-      const myOrders   = (ordersData.orders || []) as Order[];
+      const ordersData = await ordersRes.json() as { orders?: Order[] };
+      const myOrders   = ordersData.orders ?? [];
       setOrders(myOrders);
 
-      const totalSpent = myOrders.reduce((s, o) => s + (o.total || 0), 0);
-      setUser((prev) => prev ? { ...prev, totalOrders: myOrders.length, totalSpent } : prev);
+      const totalSpent = myOrders.reduce((s, o) => s + (o.total ?? 0), 0);
+      setUser((prev) =>
+        prev ? { ...prev, totalOrders: myOrders.length, totalSpent } : prev
+      );
     } catch (err) {
-      console.error(err);
+      console.error("Profile fetch error:", err);
     } finally {
       setLoading(false);
     }
@@ -128,22 +155,25 @@ export default function ProfilePage() {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({
-          uid:   user.uid,
           name:  editName.trim(),
           phone: editPhone.trim(),
         }),
       });
 
       if (res.ok) {
-        setUser((prev) => prev ? { ...prev, name: editName.trim(), phone: editPhone.trim() } : prev);
+        setUser((prev) =>
+          prev
+            ? { ...prev, name: editName.trim(), phone: editPhone.trim() }
+            : prev
+        );
         setEditing(false);
         setSaveMsg("Profile updated! ✅");
         setTimeout(() => setSaveMsg(""), 3000);
       } else {
-        setSaveMsg("Failed to update");
+        setSaveMsg("Failed to update. Please try again.");
       }
     } catch {
-      setSaveMsg("Network error");
+      setSaveMsg("Network error. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -154,16 +184,15 @@ export default function ProfilePage() {
     try {
       await signOut(auth);
       await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // Ignore — proceed with redirect
+    } finally {
       router.replace("/login");
       router.refresh();
-    } catch {
-      router.replace("/login");
-    } finally {
       setLoggingOut(false);
     }
   };
 
-  /* ── Loading State ── */
   if (loading) {
     return (
       <div className="min-h-screen bg-[#F5F5F5] flex items-center justify-center px-4">
@@ -177,19 +206,22 @@ export default function ProfilePage() {
 
   if (!user) return null;
 
-  const avgOrder = user.totalOrders > 0 ? user.totalSpent / user.totalOrders : 0;
-  const initials = user.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
+  const avgOrder = user.totalOrders > 0
+    ? user.totalSpent / user.totalOrders
+    : 0;
+  const initials = user.name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 
   return (
     <div className="min-h-screen bg-[#F5F5F5]">
 
-      {/* ══════════════════════════════════════════════
-          HERO SECTION
-          ══════════════════════════════════════════════ */}
+      {/* ── Hero Section ── */}
       <div className="relative overflow-hidden">
-        {/* Gradient Background */}
         <div className="bg-gradient-to-br from-orange-500 via-orange-600 to-red-500 relative">
-          {/* Decorative Circles */}
           <div className="absolute -top-12 -right-12 w-40 h-40 rounded-full bg-white/5" />
           <div className="absolute top-20 -left-8 w-28 h-28 rounded-full bg-white/5" />
           <div className="absolute bottom-8 right-16 w-16 h-16 rounded-full bg-white/5" />
@@ -226,7 +258,6 @@ export default function ProfilePage() {
           {/* Profile Info */}
           <div className="relative z-10 px-4 sm:px-6 pt-6 sm:pt-8 pb-12 sm:pb-14">
             <div className="flex items-start sm:items-center gap-4 sm:gap-5">
-              {/* Avatar */}
               <motion.div
                 initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
@@ -236,7 +267,6 @@ export default function ProfilePage() {
                 {initials}
               </motion.div>
 
-              {/* User Details */}
               <motion.div
                 initial={{ opacity: 0, x: 10 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -246,22 +276,18 @@ export default function ProfilePage() {
                 <h1 className="text-xl sm:text-2xl font-black text-white leading-tight truncate">
                   {user.name}
                 </h1>
-
                 {user.email && (
                   <p className="text-white/65 text-xs sm:text-sm mt-0.5 truncate flex items-center gap-1.5">
                     <Mail className="w-3 h-3 shrink-0" />
                     <span className="truncate">{user.email}</span>
                   </p>
                 )}
-
                 {user.phone && (
                   <p className="text-white/55 text-xs mt-0.5 flex items-center gap-1.5">
                     <Phone className="w-3 h-3 shrink-0" />
                     {user.phone}
                   </p>
                 )}
-
-                {/* Badges */}
                 <div className="flex items-center gap-2 mt-2.5 flex-wrap">
                   <span className="bg-white/20 backdrop-blur-sm text-white text-[10px] font-bold px-2.5 py-1 rounded-full capitalize border border-white/10">
                     {user.role}
@@ -281,65 +307,42 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* Curved Bottom */}
-          <div className="h- bg-[#F5F5F5] rounded-t-[38px] mb-9" />
+          <div className="h-8 bg-[#F5F5F5] rounded-t-[38px]" />
         </div>
       </div>
 
-      {/* ══════════════════════════════════════════════
-          MAIN CONTENT
-          ══════════════════════════════════════════════ */}
-      <div className="max-w-lg mx-auto px-4 sm:px- -mt-7 space-y-6 pb-12">
+      {/* ── Main Content ── */}
+      <div className="max-w-lg mx-auto px-4 sm:px-6 -mt-7 space-y-6 pb-12">
 
-        {/* ── Stats Cards ── */}
+        {/* Stats Cards */}
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.15 }}
           className="grid grid-cols-3 gap-2.5 sm:gap-3"
         >
-          {/* Orders */}
-          <div
-            className="bg-white rounded-[18px] p-3 sm:p-4 text-center"
-            style={{ boxShadow: "0 2px 16px rgba(0,0,0,0.06)" }}
-          >
-            <div className="w-5 h-9 sm:w-10 sm:h-10 rounded-xl bg-blue-50 flex items-center justify-center mx-auto mb-2">
-              <ShoppingBag className="w-4 h-4 sm:w-[18px] sm:h-[18px] text-blue-600" />
+          {[
+            { label: "Orders",    value: user.totalOrders,           icon: ShoppingBag, color: "bg-blue-50",   iconColor: "text-blue-600" },
+            { label: "Spent",     value: formatCurrency(user.totalSpent), icon: IndianRupee, color: "bg-green-50",  iconColor: "text-green-600" },
+            { label: "Avg Order", value: formatCurrency(avgOrder),   icon: IndianRupee, color: "bg-purple-50", iconColor: "text-purple-600" },
+          ].map((stat) => (
+            <div
+              key={stat.label}
+              className="bg-white rounded-[18px] p-3 sm:p-4 text-center"
+              style={{ boxShadow: "0 2px 16px rgba(0,0,0,0.06)" }}
+            >
+              <div className={`w-9 h-9 sm:w-10 sm:h-10 rounded-xl ${stat.color} flex items-center justify-center mx-auto mb-2`}>
+                <stat.icon className={`w-4 h-4 sm:w-[18px] sm:h-[18px] ${stat.iconColor}`} />
+              </div>
+              <p className="text-base sm:text-lg font-black text-slate-900 leading-tight truncate px-1">
+                {stat.value}
+              </p>
+              <p className="text-[10px] sm:text-[11px] text-slate-500 font-medium mt-0.5">{stat.label}</p>
             </div>
-            <p className="text-base sm:text-lg font-black text-slate-900 leading-tight">{user.totalOrders}</p>
-            <p className="text-[10px] sm:text-[11px] text-slate-500 font-medium mt-0.5">Orders</p>
-          </div>
-
-          {/* Spent */}
-          <div
-            className="bg-white rounded-[18px] p-3 sm:p-4 text-center"
-            style={{ boxShadow: "0 2px 16px rgba(0,0,0,0.06)" }}
-          >
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-green-50 flex items-center justify-center mx-auto mb-2">
-              <IndianRupee className="w-4 h-4 sm:w-[18px] sm:h-[18px] text-green-600" />
-            </div>
-            <p className="text-base sm:text-lg font-black text-slate-900 leading-tight truncate px-1">
-              {formatCurrency(user.totalSpent)}
-            </p>
-            <p className="text-[10px] sm:text-[11px] text-slate-500 font-medium mt-0.5">Spent</p>
-          </div>
-
-          {/* Avg Order */}
-          <div
-            className="bg-white rounded-[18px] p-3 sm:p-4 text-center"
-            style={{ boxShadow: "0 2px 16px rgba(0,0,0,0.06)" }}
-          >
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-purple-50 flex items-center justify-center mx-auto mb-2">
-              <IndianRupee className="w-4 h-4 sm:w-[18px] sm:h-[18px] text-purple-600" />
-            </div>
-            <p className="text-base sm:text-lg font-black text-slate-900 leading-tight truncate px-1">
-              {formatCurrency(avgOrder)}
-            </p>
-            <p className="text-[10px] sm:text-[11px] text-slate-500 font-medium mt-0.5">Avg Order</p>
-          </div>
+          ))}
         </motion.div>
 
-        {/* ── Admin Button ── */}
+        {/* Admin Button */}
         {(user.role === "admin" || user.role === "super_admin") && (
           <motion.button
             initial={{ opacity: 0, y: 10 }}
@@ -363,7 +366,7 @@ export default function ProfilePage() {
           </motion.button>
         )}
 
-        {/* ── Save Message ── */}
+        {/* Save Message */}
         <AnimatePresence>
           {saveMsg && (
             <motion.div
@@ -377,7 +380,7 @@ export default function ProfilePage() {
           )}
         </AnimatePresence>
 
-        {/* ── Tabs ── */}
+        {/* Tabs */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -386,10 +389,10 @@ export default function ProfilePage() {
           style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.05)" }}
         >
           <div className="flex gap-1.5">
-            {[
-              { key: "orders" as const, label: "My Orders",  icon: ShoppingBag },
-              { key: "info"   as const, label: "Account",    icon: Edit2 },
-            ].map((tab) => (
+            {([
+              { key: "orders" as const, label: "My Orders", icon: ShoppingBag },
+              { key: "info"   as const, label: "Account",   icon: Edit2 },
+            ] as const).map((tab) => (
               <motion.button
                 key={tab.key}
                 whileTap={{ scale: 0.97 }}
@@ -407,10 +410,10 @@ export default function ProfilePage() {
           </div>
         </motion.div>
 
-        {/* ── Tab Content ── */}
+        {/* Tab Content */}
         <AnimatePresence mode="wait">
 
-          {/* ═══ Orders Tab ═══ */}
+          {/* Orders Tab */}
           {activeTab === "orders" && (
             <motion.div
               key="orders"
@@ -418,10 +421,9 @@ export default function ProfilePage() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -12 }}
               transition={{ duration: 0.2 }}
-              className="space-y-8"
+              className="space-y-3"
             >
               {orders.length === 0 ? (
-                /* Empty State */
                 <div
                   className="bg-white rounded-[20px] p-10 sm:p-12 text-center"
                   style={{ boxShadow: "0 2px 16px rgba(0,0,0,0.06)" }}
@@ -447,10 +449,9 @@ export default function ProfilePage() {
                   </motion.button>
                 </div>
               ) : (
-                /* Order Cards */
                 orders.map((order, idx) => {
-                  const items = Array.isArray(order.items) ? order.items : [];
-                  const cfg   = statusConfig[order.status] || statusConfig.pending;
+                  const items      = Array.isArray(order.items) ? (order.items as OrderItem[]) : [];
+                  const cfg        = statusConfig[order.status ?? "pending"] ?? statusConfig.pending;
                   const StatusIcon = cfg.icon;
 
                   return (
@@ -464,7 +465,6 @@ export default function ProfilePage() {
                       className="bg-white rounded-[18px] overflow-hidden cursor-pointer group"
                       style={{ boxShadow: "0 2px 16px rgba(0,0,0,0.06)" }}
                     >
-                      {/* Order Header */}
                       <div className="p-4 pb-3">
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
@@ -491,13 +491,11 @@ export default function ProfilePage() {
                           </div>
                         </div>
 
-                        {/* Items Preview */}
                         <p className="text-xs text-slate-500 line-clamp-1 mt-2 font-medium leading-relaxed">
-                          {items.map((i: any) => `${i.quantity}× ${i.name}`).join(" • ")}
+                          {items.map((i) => `${i.quantity}× ${i.name}`).join(" • ")}
                         </p>
                       </div>
 
-                      {/* Order Footer */}
                       <div className="flex items-center justify-between px-4 py-3 bg-slate-50/60 border-t border-slate-100">
                         <p className="text-base sm:text-lg font-black text-slate-900">
                           {formatCurrency(order.total)}
@@ -515,7 +513,7 @@ export default function ProfilePage() {
             </motion.div>
           )}
 
-          {/* ═══ Account Tab ═══ */}
+          {/* Account Tab */}
           {activeTab === "info" && (
             <motion.div
               key="info"
@@ -529,7 +527,6 @@ export default function ProfilePage() {
                 className="bg-white rounded-[20px] overflow-hidden"
                 style={{ boxShadow: "0 2px 16px rgba(0,0,0,0.06)" }}
               >
-                {/* Card Header */}
                 <div className="flex items-center justify-between px-4 sm:px-5 py-3.5 border-b border-slate-100">
                   <h3 className="text-sm font-black text-slate-900">Personal Details</h3>
                   {!editing ? (
@@ -543,7 +540,11 @@ export default function ProfilePage() {
                   ) : (
                     <motion.button
                       whileTap={{ scale: 0.92 }}
-                      onClick={() => { setEditing(false); setEditName(user.name); setEditPhone(user.phone); }}
+                      onClick={() => {
+                        setEditing(false);
+                        setEditName(user.name);
+                        setEditPhone(user.phone);
+                      }}
                       className="flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-slate-600 bg-slate-100 px-3 py-1.5 rounded-lg"
                     >
                       <X className="w-3.5 h-3.5" /> Cancel
@@ -551,10 +552,8 @@ export default function ProfilePage() {
                   )}
                 </div>
 
-                {/* Form */}
                 <div className="p-4 sm:p-5 space-y-5">
-
-                  {/* Full Name */}
+                  {/* Name */}
                   <div>
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.1em] mb-2">
                       Full Name
@@ -598,15 +597,13 @@ export default function ProfilePage() {
                           <Phone className="w-4 h-4 text-blue-600" />
                         </div>
                         <p className="text-sm font-bold text-slate-900">
-                          {user.phone || (
-                            <span className="text-slate-400 font-medium">Not added</span>
-                          )}
+                          {user.phone || <span className="text-slate-400 font-medium">Not added</span>}
                         </p>
                       </div>
                     )}
                   </div>
 
-                  {/* Email - Read Only */}
+                  {/* Email — Read Only */}
                   <div>
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.1em] mb-2">
                       Email Address
@@ -618,11 +615,6 @@ export default function ProfilePage() {
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-bold text-slate-900 truncate">{user.email}</p>
                         <p className="text-[10px] text-slate-400 font-medium mt-0.5">Cannot be changed</p>
-                      </div>
-                      <div className="w-5 h-5 rounded-full bg-slate-200 flex items-center justify-center shrink-0">
-                        <svg className="w-3 h-3 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                          <path strokeLinecap="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-                        </svg>
                       </div>
                     </div>
                   </div>
@@ -652,16 +644,12 @@ export default function ProfilePage() {
                           whileTap={{ scale: 0.97 }}
                           onClick={handleSaveProfile}
                           disabled={saving || !editName.trim()}
-                          className="w-full h-13 bg-orange-500 text-white font-black rounded-2xl disabled:opacity-50 flex items-center justify-center gap-2.5 shadow-lg shadow-orange-200/60 hover:bg-orange-600 transition-colors text-sm"
-                          style={{ height: 52 }}
+                          className="w-full h-[52px] bg-orange-500 text-white font-black rounded-2xl disabled:opacity-50 flex items-center justify-center gap-2.5 shadow-lg shadow-orange-200/60 hover:bg-orange-600 transition-colors text-sm"
                         >
                           {saving ? (
                             <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                           ) : (
-                            <>
-                              <Save className="w-4 h-4" />
-                              Save Changes
-                            </>
+                            <><Save className="w-4 h-4" /> Save Changes</>
                           )}
                         </motion.button>
                       </motion.div>
@@ -673,7 +661,7 @@ export default function ProfilePage() {
           )}
         </AnimatePresence>
 
-        {/* ── Bottom Sign Out ── */}
+        {/* Sign Out Button */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -683,16 +671,12 @@ export default function ProfilePage() {
             whileTap={{ scale: 0.98 }}
             onClick={handleLogout}
             disabled={loggingOut}
-            className="w-full h-13 bg-red-50 border-2 border-red-200 text-red-600 font-black rounded-2xl flex items-center justify-center gap-2.5 hover:bg-red-100 transition-all disabled:opacity-50 text-sm"
-            style={{ height: 52 }}
+            className="w-full h-[52px] bg-red-50 border-2 border-red-200 text-red-600 font-black rounded-2xl flex items-center justify-center gap-2.5 hover:bg-red-100 transition-all disabled:opacity-50 text-sm"
           >
             {loggingOut ? (
               <div className="w-5 h-5 border-2 border-red-200 border-t-red-600 rounded-full animate-spin" />
             ) : (
-              <>
-                <LogOut className="w-5 h-5" />
-                Sign Out
-              </>
+              <><LogOut className="w-5 h-5" /> Sign Out</>
             )}
           </motion.button>
 

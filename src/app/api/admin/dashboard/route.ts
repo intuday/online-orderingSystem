@@ -1,172 +1,177 @@
-import { db, collection, getDocs, query, where } from "@/lib/firebase-admin";
-import type { Order, MenuItem } from "@/lib/firebase";
+// src/app/api/admin/dashboard/route.ts
+import {
+  db, collection, getDocs,
+  query, where, orderBy, limit,
+}                        from "@/lib/firebase-admin";
+import type { Order, MenuItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-type AdminTable = {
-  id: string;
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const RECENT_ORDERS_LIMIT  = 10;
+const POPULAR_ITEMS_LIMIT  = 5;
+const DASHBOARD_ORDER_LIMIT = 500; // cap for stats calculation
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface AdminTable {
+  id:      string;
   status?: string;
-};
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function extractSeconds(value: unknown): number {
+  if (!value || typeof value !== "object") return 0;
+  const v = value as Record<string, unknown>;
+  if (typeof v._seconds === "number") return v._seconds;
+  if (typeof v.seconds  === "number") return v.seconds;
+  return 0;
+}
 
 function toDate(value: unknown): Date | null {
   if (!value) return null;
-
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? null : value;
-  }
-
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
   if (typeof value === "string" || typeof value === "number") {
     const d = new Date(value);
     return Number.isNaN(d.getTime()) ? null : d;
   }
-
   if (typeof value === "object" && value !== null) {
-    const v = value as {
-      toDate?: () => Date;
-      seconds?: number;
-      _seconds?: number;
-    };
-
-    if (typeof v.toDate === "function") {
-      const d = v.toDate();
-      return Number.isNaN(d.getTime()) ? null : d;
-    }
-
-    if (typeof v.seconds === "number") {
-      const d = new Date(v.seconds * 1000);
-      return Number.isNaN(d.getTime()) ? null : d;
-    }
-
-    if (typeof v._seconds === "number") {
-      const d = new Date(v._seconds * 1000);
-      return Number.isNaN(d.getTime()) ? null : d;
-    }
+    const v = value as { toDate?: () => Date; seconds?: number; _seconds?: number };
+    if (typeof v.toDate   === "function") return v.toDate();
+    if (typeof v.seconds  === "number")   return new Date(v.seconds  * 1000);
+    if (typeof v._seconds === "number")   return new Date(v._seconds * 1000);
   }
-
   return null;
 }
+
+// ─── Route Handler ────────────────────────────────────────────────────────────
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const restaurantId =
-      searchParams.get("restaurantId") ||
-      process.env.NEXT_PUBLIC_RESTAURANT_ID ||
+    const restaurantId     =
+      searchParams.get("restaurantId")         ??
+      process.env.NEXT_PUBLIC_RESTAURANT_ID    ??
       "demo-restaurant";
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // ✅ Simple queries only - no orderBy / no limit / no extra index
-    const [ordersSnap, tablesSnap, productsSnap, customersSnap] = await Promise.all([
-      getDocs(
-        query(
-          collection(db, "orders"),
-          where("restaurantId", "==", restaurantId)
-        )
-      ),
-      getDocs(
-        query(
-          collection(db, "tables"),
-          where("restaurantId", "==", restaurantId)
-        )
-      ),
-      getDocs(
-        query(
-          collection(db, "products"),
-          where("restaurantId", "==", restaurantId)
-        )
-      ),
-      getDocs(
-        query(
-          collection(db, "users"),
-          where("restaurantId", "==", restaurantId)
-        )
-      ),
-    ]);
+    // ── Firestore Queries ───────────────────────────────────────────────────
+    // Orders: capped at DASHBOARD_ORDER_LIMIT, sorted server-side
+    // Tables and products: small collections — full fetch acceptable
+    // Customers: count only — no document data needed
 
-    const allOrders = ordersSnap.docs.map((d) => ({
-      id: d.id,
-      ...d.data(),
-    })) as Order[];
+    const [ordersSnap, tablesSnap, productsSnap, customersSnap] =
+      await Promise.all([
+        getDocs(
+          query(
+            collection(db, "orders"),
+            where("restaurantId", "==", restaurantId),
+            orderBy("createdAt", "desc"),
+            limit(DASHBOARD_ORDER_LIMIT)
+          )
+        ),
+        getDocs(
+          query(
+            collection(db, "tables"),
+            where("restaurantId", "==", restaurantId)
+          )
+        ),
+        getDocs(
+          query(
+            collection(db, "products"),
+            where("restaurantId", "==", restaurantId),
+            orderBy("orderCount", "desc"),
+            limit(POPULAR_ITEMS_LIMIT)
+          )
+        ),
+        getDocs(
+          query(
+            collection(db, "users"),
+            where("restaurantId", "==", restaurantId)
+          )
+        ),
+      ]);
 
-    const allTables = tablesSnap.docs.map((d) => ({
-      id: d.id,
-      ...d.data(),
-    })) as AdminTable[];
+    const allOrders  = ordersSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as Order[];
+    const allTables  = tablesSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as AdminTable[];
+    const popularItems = productsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as MenuItem[];
 
-    const allProducts = productsSnap.docs.map((d) => ({
-      id: d.id,
-      ...d.data(),
-    })) as MenuItem[];
+    // ── Compute Stats in a Single Pass ──────────────────────────────────────
 
-    // ✅ JS sort instead of Firestore orderBy
-    allOrders.sort((a, b) => {
-      const aTime = toDate((a as any).createdAt)?.getTime() ?? 0;
-      const bTime = toDate((b as any).createdAt)?.getTime() ?? 0;
-      return bTime - aTime;
-    });
+    let totalRevenue   = 0;
+    let todayRevenue   = 0;
+    let totalOrders    = allOrders.length;
+    let todayOrderCount = 0;
+    let pendingOrders  = 0;
+    let preparingOrders = 0;
 
-    const todayOrders = allOrders.filter((o) => {
-      const orderDate = toDate((o as any).createdAt);
-      return orderDate ? orderDate >= today : false;
-    });
-
-    const totalRevenue = allOrders
-      .filter((o) => (o as any).paymentStatus === "paid")
-      .reduce((sum, o) => sum + (Number((o as any).total) || 0), 0);
-
-    const todayRevenue = todayOrders
-      .filter((o) => (o as any).paymentStatus === "paid")
-      .reduce((sum, o) => sum + (Number((o as any).total) || 0), 0);
-
-    const pendingOrders = allOrders.filter((o) => (o as any).status === "pending").length;
-    const preparingOrders = allOrders.filter((o) => (o as any).status === "preparing").length;
-    const activeTables = allTables.filter((t) => t.status === "occupied").length;
-
-    // ✅ Popular items JS mein nikaalo
-    const popularItems = [...allProducts]
-      .sort((a, b) => ((b as any).orderCount ?? 0) - ((a as any).orderCount ?? 0))
-      .slice(0, 5);
-
-    const last7Days = Array.from({ length: 7 }, (_, i) => {
+    // Build chart buckets in one pass — O(n) instead of O(7n)
+    const chartBuckets: Record<string, { orders: number; revenue: number }> = {};
+    for (let i = 0; i < 7; i++) {
       const d = new Date();
       d.setDate(d.getDate() - (6 - i));
       d.setHours(0, 0, 0, 0);
+      chartBuckets[d.toISOString().slice(5, 10)] = { orders: 0, revenue: 0 };
+    }
 
-      const nextD = new Date(d);
-      nextD.setDate(nextD.getDate() + 1);
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+    sevenDaysAgo.setHours(0, 0, 0, 0);
 
-      const dayOrders = allOrders.filter((o) => {
-        const ot = toDate((o as any).createdAt);
-        return ot ? ot >= d && ot < nextD : false;
-      });
+    for (const order of allOrders) {
+      const isPaid   = order.paymentStatus === "paid";
+      const total    = Number(order.total)  || 0;
+      const orderDate = toDate(order.createdAt);
 
-      return {
-        date: d.toISOString().slice(5, 10),
-        orders: dayOrders.length,
-        revenue: dayOrders
-          .filter((o) => (o as any).paymentStatus === "paid")
-          .reduce((s, o) => s + (Number((o as any).total) || 0), 0),
-      };
-    });
+      if (isPaid) totalRevenue += total;
+
+      if (orderDate && orderDate >= today) {
+        todayOrderCount++;
+        if (isPaid) todayRevenue += total;
+      }
+
+      if (order.status === "pending")   pendingOrders++;
+      if (order.status === "preparing") preparingOrders++;
+
+      // Chart data — only for last 7 days
+      if (orderDate && orderDate >= sevenDaysAgo) {
+        const key = orderDate.toISOString().slice(5, 10);
+        if (chartBuckets[key]) {
+          chartBuckets[key].orders++;
+          if (isPaid) chartBuckets[key].revenue += total;
+        }
+      }
+    }
+
+    const chartData = Object.entries(chartBuckets).map(([date, v]) => ({
+      date,
+      orders:  v.orders,
+      revenue: v.revenue,
+    }));
+
+    const activeTables = allTables.filter((t) => t.status === "occupied").length;
 
     return Response.json({
       totalRevenue,
       todayRevenue,
-      totalOrders: allOrders.length,
-      todayOrders: todayOrders.length,
+      totalOrders,
+      todayOrders:    todayOrderCount,
       pendingOrders,
       preparingOrders,
       totalCustomers: customersSnap.size,
       activeTables,
-      totalTables: allTables.length,
+      totalTables:    allTables.length,
       popularItems,
-      recentOrders: allOrders.slice(0, 10),
-      chartData: last7Days,
+      recentOrders:   allOrders.slice(0, RECENT_ORDERS_LIMIT),
+      chartData,
     });
+
   } catch (error) {
     console.error("Dashboard error:", error);
-    return Response.json({ error: "Failed to fetch dashboard" }, { status: 500 });
+    return Response.json({ error: "Failed to fetch dashboard data" }, { status: 500 });
   }
 }
