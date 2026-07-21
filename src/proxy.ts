@@ -1,78 +1,100 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verify } from "jsonwebtoken";
 
-const JWT_SECRET = process.env.JWT_SECRET || "restaurant-saas-super-secret-jwt-key-2024";
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Firebase ID token check — sirf presence aur basic format check karta hai.
+ * Full verification server-side API routes mein hoti hai (adminAuth.verifyIdToken).
+ * Middleware mein Firebase Admin SDK use nahi kar sakte — Edge runtime support nahi.
+ */
+function hasValidTokenFormat(token: string | undefined): boolean {
+  if (!token) return false;
+  // JWT format: 3 parts separated by dots
+  const parts = token.split(".");
+  return parts.length === 3;
+}
+
+/**
+ * Token se role nikalna — Firebase ID token ka payload base64 decode karke.
+ * Ye cryptographic verification nahi hai — sirf role check ke liye hai.
+ * Real security API routes mein adminAuth.verifyIdToken() se hoti hai.
+ */
+function getRoleFromToken(token: string): string {
+  try {
+    const payload = JSON.parse(
+      Buffer.from(token.split(".")[1], "base64url").toString("utf-8")
+    );
+    // Custom claims se role lo (agar set hain)
+    return payload.role ?? "";
+  } catch {
+    return "";
+  }
+}
+
+// ─── Proxy / Middleware ───────────────────────────────────────────────────────
 
 export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // ✅ Root → splash → /menu already handle ho raha hai page.tsx mein
+  const authToken  = req.cookies.get("auth-token")?.value;
+  const hasToken   = hasValidTokenFormat(authToken);
 
-  // ✅ Admin login redirect
+  // ── Admin login page ──────────────────────────────────────────────────────
   if (pathname === "/admin/login") {
-    const token = req.cookies.get("admin-token")?.value || req.cookies.get("auth-token")?.value;
-    if (token) {
-      try {
-        const d = verify(token, JWT_SECRET) as any;
-        if (d.role === "admin" || d.role === "super_admin") {
-          return NextResponse.redirect(new URL("/admin", req.url));
-        }
-      } catch {}
+    if (hasToken) {
+      const role = getRoleFromToken(authToken!);
+      if (role === "admin" || role === "super_admin") {
+        return NextResponse.redirect(new URL("/admin", req.url));
+      }
     }
     return NextResponse.next();
   }
 
-  // ✅ Admin routes protect
+  // ── Admin routes ──────────────────────────────────────────────────────────
   if (pathname === "/admin" || pathname.startsWith("/admin/")) {
     if (pathname === "/admin/login") return NextResponse.next();
 
-    const token = req.cookies.get("admin-token")?.value || req.cookies.get("auth-token")?.value;
-    if (!token) {
+    if (!hasToken) {
       return NextResponse.redirect(new URL(`/login?redirect=${pathname}`, req.url));
     }
-    try {
-      const d = verify(token, JWT_SECRET) as any;
-      if (d.role !== "admin" && d.role !== "super_admin") {
-        return NextResponse.redirect(new URL("/menu", req.url));
-      }
+
+    const role = getRoleFromToken(authToken!);
+    if (role === "admin" || role === "super_admin") {
       return NextResponse.next();
-    } catch {
-      const res = NextResponse.redirect(new URL(`/login?redirect=${pathname}`, req.url));
-      res.cookies.delete("admin-token");
-      res.cookies.delete("auth-token");
-      return res;
     }
+
+    // Token hai lekin role nahi pata (Firebase token without custom claims)
+    // API route pe jaane do — wahan proper verification hogi
+    // Agar role nahi milta toh admin layout khud redirect karega
+    return NextResponse.next();
   }
 
-  // ✅ Login/Signup - already logged in redirect
+  // ── Login / Signup page ───────────────────────────────────────────────────
   if (pathname === "/login" || pathname === "/signup") {
-    const token = req.cookies.get("auth-token")?.value;
-    if (token) {
-      try {
-        const d    = verify(token, JWT_SECRET) as any;
-        const redir = req.nextUrl.searchParams.get("redirect");
-        if (redir) return NextResponse.redirect(new URL(redir, req.url));
-        if (d.role === "admin" || d.role === "super_admin") {
-          return NextResponse.redirect(new URL("/admin", req.url));
-        }
-        return NextResponse.redirect(new URL("/menu", req.url));
-      } catch {}
+    if (hasToken) {
+      // Token present hai — already logged in
+      // Redirect param dekho
+      const redir = req.nextUrl.searchParams.get("redirect");
+      if (redir && redir !== "/login" && redir !== "/signup") {
+        return NextResponse.redirect(new URL(redir, req.url));
+      }
+      // Role check karo for admin redirect
+      const role = getRoleFromToken(authToken!);
+      if (role === "admin" || role === "super_admin") {
+        return NextResponse.redirect(new URL("/admin", req.url));
+      }
+      return NextResponse.redirect(new URL("/menu", req.url));
     }
     return NextResponse.next();
   }
 
-  // ✅ Profile page - login required
+  // ── Profile page ──────────────────────────────────────────────────────────
   if (pathname === "/profile") {
-    const token = req.cookies.get("auth-token")?.value;
-    if (!token) {
+    if (!hasToken) {
       return NextResponse.redirect(new URL("/login?redirect=/profile", req.url));
     }
-    try {
-      verify(token, JWT_SECRET);
-      return NextResponse.next();
-    } catch {
-      return NextResponse.redirect(new URL("/login?redirect=/profile", req.url));
-    }
+    // Token present — aage jaane do, profile page khud verify karega
+    return NextResponse.next();
   }
 
   return NextResponse.next();
