@@ -10,8 +10,8 @@ import {
   XCircle, ChefHat, Sparkles, Phone, Mail,
   IndianRupee, QrCode, Edit2, Save, X,
 } from "lucide-react";
-import { formatCurrency }   from "@/lib/utils";
-import { auth, signOut }    from "@/lib/firebase";
+import { formatCurrency }        from "@/lib/utils";
+import { auth, signOut }         from "@/lib/firebase";
 import type { Order, OrderItem } from "@/lib/types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -69,10 +69,10 @@ const statusConfig: Record<string, {
   icon:  React.ComponentType<{ className?: string }>;
   label: string;
 }> = {
-  pending:   { color: "text-amber-700",   bg: "bg-amber-50 border-amber-200",     icon: Clock,       label: "Pending" },
+  pending:   { color: "text-amber-700",   bg: "bg-amber-50 border-amber-200",     icon: Clock,       label: "Pending"   },
   preparing: { color: "text-blue-700",    bg: "bg-blue-50 border-blue-200",       icon: ChefHat,     label: "Preparing" },
-  ready:     { color: "text-green-700",   bg: "bg-green-50 border-green-200",     icon: CheckCircle, label: "Ready" },
-  served:    { color: "text-emerald-700", bg: "bg-emerald-50 border-emerald-200", icon: CheckCircle, label: "Served" },
+  ready:     { color: "text-green-700",   bg: "bg-green-50 border-green-200",     icon: CheckCircle, label: "Ready"     },
+  served:    { color: "text-emerald-700", bg: "bg-emerald-50 border-emerald-200", icon: CheckCircle, label: "Served"    },
   completed: { color: "text-slate-600",   bg: "bg-slate-50 border-slate-200",     icon: Package,     label: "Completed" },
   cancelled: { color: "text-red-600",     bg: "bg-red-50 border-red-200",         icon: XCircle,     label: "Cancelled" },
 };
@@ -96,6 +96,7 @@ export default function ProfilePage() {
 
   const fetchData = useCallback(async () => {
     try {
+      // ── Auth Check ────────────────────────────────────────────────────────
       const authRes  = await fetch("/api/auth/verify-status");
       const authData = await authRes.json() as {
         authenticated: boolean;
@@ -114,6 +115,7 @@ export default function ProfilePage() {
       }
 
       const u = authData.user;
+
       setUser({
         uid:         u.uid   ?? "",
         name:        u.name  ?? "User",
@@ -126,19 +128,32 @@ export default function ProfilePage() {
       setEditName(u.name  ?? "");
       setEditPhone(u.phone ?? "");
 
-      const ordersRes  = await fetch(
-        `/api/orders?customerId=${u.uid}&restaurantId=${RESTAURANT_ID}`
-      );
-      const ordersData = await ordersRes.json() as { orders?: Order[] };
-      const myOrders   = ordersData.orders ?? [];
-      setOrders(myOrders);
+      // ── Orders Fetch ──────────────────────────────────────────────────────
+      // ✅ Error aaye toh redirect mat karo — sirf orders empty dikhao
+      try {
+        const ordersRes = await fetch(
+          `/api/orders?customerId=${u.uid}&restaurantId=${RESTAURANT_ID}`
+        );
 
-      const totalSpent = myOrders.reduce((s, o) => s + (o.total ?? 0), 0);
-      setUser((prev) =>
-        prev ? { ...prev, totalOrders: myOrders.length, totalSpent } : prev
-      );
+        if (ordersRes.ok) {
+          const ordersData = await ordersRes.json() as { orders?: Order[] };
+          const myOrders   = ordersData.orders ?? [];
+          setOrders(myOrders);
+
+          const totalSpent = myOrders.reduce((s, o) => s + (o.total ?? 0), 0);
+          setUser((prev) =>
+            prev ? { ...prev, totalOrders: myOrders.length, totalSpent } : prev
+          );
+        }
+        // 401 ya koi bhi error aaye — silently ignore, orders empty dikhao
+      } catch {
+        // Network error on orders — profile still show karo
+      }
+
     } catch (err) {
       console.error("Profile fetch error:", err);
+      // Sirf auth fail pe redirect karo
+      router.replace("/login?redirect=/profile");
     } finally {
       setLoading(false);
     }
@@ -162,9 +177,7 @@ export default function ProfilePage() {
 
       if (res.ok) {
         setUser((prev) =>
-          prev
-            ? { ...prev, name: editName.trim(), phone: editPhone.trim() }
-            : prev
+          prev ? { ...prev, name: editName.trim(), phone: editPhone.trim() } : prev
         );
         setEditing(false);
         setSaveMsg("Profile updated! ✅");
@@ -185,13 +198,15 @@ export default function ProfilePage() {
       await signOut(auth);
       await fetch("/api/auth/logout", { method: "POST" });
     } catch {
-      // Ignore — proceed with redirect
+      // Ignore — redirect anyway
     } finally {
       router.replace("/login");
       router.refresh();
       setLoggingOut(false);
     }
   };
+
+  // ── Loading ───────────────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -206,15 +221,8 @@ export default function ProfilePage() {
 
   if (!user) return null;
 
-  const avgOrder = user.totalOrders > 0
-    ? user.totalSpent / user.totalOrders
-    : 0;
-  const initials = user.name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
+  const avgOrder = user.totalOrders > 0 ? user.totalSpent / user.totalOrders : 0;
+  const initials = user.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
 
   return (
     <div className="min-h-screen bg-[#F5F5F5]">
@@ -322,9 +330,9 @@ export default function ProfilePage() {
           className="grid grid-cols-3 gap-2.5 sm:gap-3"
         >
           {[
-            { label: "Orders",    value: user.totalOrders,           icon: ShoppingBag, color: "bg-blue-50",   iconColor: "text-blue-600" },
-            { label: "Spent",     value: formatCurrency(user.totalSpent), icon: IndianRupee, color: "bg-green-50",  iconColor: "text-green-600" },
-            { label: "Avg Order", value: formatCurrency(avgOrder),   icon: IndianRupee, color: "bg-purple-50", iconColor: "text-purple-600" },
+            { label: "Orders",    value: user.totalOrders,               icon: ShoppingBag, color: "bg-blue-50",   iconColor: "text-blue-600"   },
+            { label: "Spent",     value: formatCurrency(user.totalSpent), icon: IndianRupee, color: "bg-green-50",  iconColor: "text-green-600"  },
+            { label: "Avg Order", value: formatCurrency(avgOrder),        icon: IndianRupee, color: "bg-purple-50", iconColor: "text-purple-600" },
           ].map((stat) => (
             <div
               key={stat.label}
@@ -475,7 +483,6 @@ export default function ProfilePage() {
                               {timeAgo(order.createdAt)}
                             </p>
                           </div>
-
                           <div className="flex items-center gap-1.5 shrink-0">
                             {order.tableId && (
                               <span className="bg-slate-100 text-slate-500 text-[9px] font-bold px-2 py-1 rounded-lg flex items-center gap-1 border border-slate-200">
@@ -490,12 +497,10 @@ export default function ProfilePage() {
                             </span>
                           </div>
                         </div>
-
                         <p className="text-xs text-slate-500 line-clamp-1 mt-2 font-medium leading-relaxed">
                           {items.map((i) => `${i.quantity}× ${i.name}`).join(" • ")}
                         </p>
                       </div>
-
                       <div className="flex items-center justify-between px-4 py-3 bg-slate-50/60 border-t border-slate-100">
                         <p className="text-base sm:text-lg font-black text-slate-900">
                           {formatCurrency(order.total)}

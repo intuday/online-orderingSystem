@@ -1,20 +1,13 @@
 // src/app/api/auth/verify-status/route.ts
-//
-// Verifies the auth-token cookie and returns the authenticated user's profile.
-// Used by client components to check auth state and get user info.
-//
-// The auth-token cookie contains a Firebase ID token (not a custom JWT).
-// We verify it with adminAuth.verifyIdToken() then read the full profile
-// from Firestore — because Firebase ID tokens do not contain custom fields
-// like role, phone, or restaurantId unless set as custom claims.
-
 import { NextRequest, NextResponse } from "next/server";
 import {
   adminAuth, db,
   doc, getDoc,
 }                                    from "@/lib/firebase-admin";
 
-// ─── Route Handler ────────────────────────────────────────────────────────────
+const RESTAURANT_ID =
+  process.env.NEXT_PUBLIC_RESTAURANT_ID ??
+  "a0000000-0000-0000-0000-000000000001";
 
 export async function GET(req: NextRequest) {
   try {
@@ -24,15 +17,18 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ authenticated: false }, { status: 401 });
     }
 
-    // ── Verify Firebase ID Token ────────────────────────────────────────────
+    // ── Verify Firebase ID Token ──────────────────────────────────────────────
 
     let uid: string;
     try {
       const decoded = await adminAuth.verifyIdToken(token);
       uid           = decoded.uid;
     } catch {
-      // Token is invalid or expired — clear the cookie
-      const response = NextResponse.json({ authenticated: false }, { status: 401 });
+      // Token invalid or expired — clear cookie
+      const response = NextResponse.json(
+        { authenticated: false },
+        { status: 401 }
+      );
       response.cookies.set("auth-token", "", {
         httpOnly: true,
         secure:   process.env.NODE_ENV === "production",
@@ -43,14 +39,11 @@ export async function GET(req: NextRequest) {
       return response;
     }
 
-    // ── Read Full Profile from Firestore ────────────────────────────────────
-    // Firebase ID tokens do not include custom fields (role, phone, restaurantId).
-    // We always read from Firestore to get the complete, up-to-date user profile.
+    // ── Read Profile from Firestore ───────────────────────────────────────────
 
     const userSnap = await getDoc(doc(db, "users", uid));
 
     if (!userSnap.exists()) {
-      // Token is valid but no profile exists yet
       return NextResponse.json({
         authenticated: true,
         user: {
@@ -59,7 +52,9 @@ export async function GET(req: NextRequest) {
           role:         "customer",
           name:         "",
           phone:        "",
-          restaurantId: process.env.NEXT_PUBLIC_RESTAURANT_ID ?? "",
+          restaurantId: RESTAURANT_ID,
+          displayName:  null,
+          photoURL:     null,
         },
       });
     }
@@ -70,13 +65,14 @@ export async function GET(req: NextRequest) {
       authenticated: true,
       user: {
         uid,
-        email:        (profile.email        as string)  ?? null,
-        role:         (profile.role         as string)  ?? "customer",
-        name:         (profile.name         as string)  ?? "",
-        phone:        (profile.phone        as string)  ?? "",
-        restaurantId: (profile.restaurantId as string)  ?? "",
-        displayName:  (profile.displayName  as string)  ?? null,
-        photoURL:     (profile.photoURL     as string)  ?? null,
+        email:        (profile.email        as string) ?? null,
+        role:         (profile.role         as string) ?? "customer",
+        name:         (profile.name         as string) ?? "",
+        phone:        (profile.phone        as string) ?? "",
+        // ✅ restaurantId empty hone pe env var se fallback
+        restaurantId: (profile.restaurantId as string) || RESTAURANT_ID,
+        displayName:  (profile.displayName  as string) ?? null,
+        photoURL:     (profile.photoURL     as string) ?? null,
       },
     });
 
