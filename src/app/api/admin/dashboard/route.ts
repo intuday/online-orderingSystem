@@ -9,9 +9,9 @@ export const dynamic = "force-dynamic";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const RECENT_ORDERS_LIMIT  = 10;
-const POPULAR_ITEMS_LIMIT  = 5;
-const DASHBOARD_ORDER_LIMIT = 500; // cap for stats calculation
+const RECENT_ORDERS_LIMIT   = 10;
+const POPULAR_ITEMS_LIMIT   = 5;
+const DASHBOARD_ORDER_LIMIT = 500;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -21,14 +21,6 @@ interface AdminTable {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function extractSeconds(value: unknown): number {
-  if (!value || typeof value !== "object") return 0;
-  const v = value as Record<string, unknown>;
-  if (typeof v._seconds === "number") return v._seconds;
-  if (typeof v.seconds  === "number") return v.seconds;
-  return 0;
-}
 
 function toDate(value: unknown): Date | null {
   if (!value) return null;
@@ -52,20 +44,18 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const restaurantId     =
-      searchParams.get("restaurantId")         ??
-      process.env.NEXT_PUBLIC_RESTAURANT_ID    ??
+      searchParams.get("restaurantId")      ??
+      process.env.NEXT_PUBLIC_RESTAURANT_ID ??
       "demo-restaurant";
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // ── Firestore Queries ───────────────────────────────────────────────────
-    // Orders: capped at DASHBOARD_ORDER_LIMIT, sorted server-side
-    // Tables and products: small collections — full fetch acceptable
-    // Customers: count only — no document data needed
+    // ── Firestore Queries ─────────────────────────────────────────────────────
+    // Promise.allSettled — ek query fail hone se dashboard crash nahi hoga
 
-    const [ordersSnap, tablesSnap, productsSnap, customersSnap] =
-      await Promise.all([
+    const [ordersResult, tablesResult, productsResult, customersResult] =
+      await Promise.allSettled([
         getDocs(
           query(
             collection(db, "orders"),
@@ -80,12 +70,23 @@ export async function GET(request: Request) {
             where("restaurantId", "==", restaurantId)
           )
         ),
+        // ✅ Popular items — orderCount index required
+        // Agar index missing ho toh fallback: sortOrder se fetch karo
         getDocs(
           query(
             collection(db, "products"),
             where("restaurantId", "==", restaurantId),
             orderBy("orderCount", "desc"),
             limit(POPULAR_ITEMS_LIMIT)
+          )
+        ).catch(() =>
+          // Fallback — bina orderBy ke fetch karo agar index missing ho
+          getDocs(
+            query(
+              collection(db, "products"),
+              where("restaurantId", "==", restaurantId),
+              limit(POPULAR_ITEMS_LIMIT)
+            )
           )
         ),
         getDocs(
@@ -96,20 +97,38 @@ export async function GET(request: Request) {
         ),
       ]);
 
-    const allOrders  = ordersSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as Order[];
-    const allTables  = tablesSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as AdminTable[];
-    const popularItems = productsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as MenuItem[];
+    // ── Extract Results ───────────────────────────────────────────────────────
 
-    // ── Compute Stats in a Single Pass ──────────────────────────────────────
+    const allOrders = ordersResult.status === "fulfilled"
+      ? ordersResult.value.docs.map((d) => ({ id: d.id, ...d.data() })) as Order[]
+      : [];
 
-    let totalRevenue   = 0;
-    let todayRevenue   = 0;
-    let totalOrders    = allOrders.length;
+    const allTables = tablesResult.status === "fulfilled"
+      ? tablesResult.value.docs.map((d) => ({ id: d.id, ...d.data() })) as AdminTable[]
+      : [];
+
+    const popularItems = productsResult.status === "fulfilled"
+      ? productsResult.value.docs.map((d) => ({ id: d.id, ...d.data() })) as MenuItem[]
+      : [];
+
+    const totalCustomers = customersResult.status === "fulfilled"
+      ? customersResult.value.size
+      : 0;
+
+    // Log partial failures — dashboard still returns data
+    if (ordersResult.status   === "rejected") console.error("Dashboard orders error:",   ordersResult.reason);
+    if (tablesResult.status   === "rejected") console.error("Dashboard tables error:",   tablesResult.reason);
+    if (productsResult.status === "rejected") console.error("Dashboard products error:", productsResult.reason);
+    if (customersResult.status === "rejected") console.error("Dashboard customers error:", customersResult.reason);
+
+    // ── Compute Stats in Single Pass ──────────────────────────────────────────
+
+    let totalRevenue    = 0;
+    let todayRevenue    = 0;
     let todayOrderCount = 0;
-    let pendingOrders  = 0;
+    let pendingOrders   = 0;
     let preparingOrders = 0;
 
-    // Build chart buckets in one pass — O(n) instead of O(7n)
     const chartBuckets: Record<string, { orders: number; revenue: number }> = {};
     for (let i = 0; i < 7; i++) {
       const d = new Date();
@@ -123,8 +142,8 @@ export async function GET(request: Request) {
     sevenDaysAgo.setHours(0, 0, 0, 0);
 
     for (const order of allOrders) {
-      const isPaid   = order.paymentStatus === "paid";
-      const total    = Number(order.total)  || 0;
+      const isPaid    = order.paymentStatus === "paid";
+      const total     = Number(order.total) || 0;
       const orderDate = toDate(order.createdAt);
 
       if (isPaid) totalRevenue += total;
@@ -137,7 +156,6 @@ export async function GET(request: Request) {
       if (order.status === "pending")   pendingOrders++;
       if (order.status === "preparing") preparingOrders++;
 
-      // Chart data — only for last 7 days
       if (orderDate && orderDate >= sevenDaysAgo) {
         const key = orderDate.toISOString().slice(5, 10);
         if (chartBuckets[key]) {
@@ -158,11 +176,11 @@ export async function GET(request: Request) {
     return Response.json({
       totalRevenue,
       todayRevenue,
-      totalOrders,
+      totalOrders:    allOrders.length,
       todayOrders:    todayOrderCount,
       pendingOrders,
       preparingOrders,
-      totalCustomers: customersSnap.size,
+      totalCustomers,
       activeTables,
       totalTables:    allTables.length,
       popularItems,
@@ -172,6 +190,9 @@ export async function GET(request: Request) {
 
   } catch (error) {
     console.error("Dashboard error:", error);
-    return Response.json({ error: "Failed to fetch dashboard data" }, { status: 500 });
+    return Response.json(
+      { error: "Failed to fetch dashboard data" },
+      { status: 500 }
+    );
   }
 }

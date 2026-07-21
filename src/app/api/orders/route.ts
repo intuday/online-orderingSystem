@@ -1,14 +1,23 @@
 // src/app/api/orders/route.ts
 import {
-  db, collection, getDocs, addDoc,
-  query, where, serverTimestamp,
-  doc, updateDoc, getDoc, limit, orderBy,
+  db,
+  collection,
+  getDocs,
+  addDoc,
+  query,
+  where,
+  serverTimestamp,
+  doc,
+  updateDoc,
+  getDoc,
+  limit,
+  orderBy,
   adminAuth,
-}                                           from "@/lib/firebase-admin";
-import { FieldValue }                       from "firebase-admin/firestore";
+} from "@/lib/firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
 import { generateOrderNumber, calculateCGST, calculateSGST } from "@/lib/utils";
-import type { Order, OrderStatus }          from "@/lib/types";
-import { NextRequest }                      from "next/server";
+import type { Order, OrderStatus } from "@/lib/types";
+import { NextRequest } from "next/server";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +47,13 @@ interface RawOrderItem {
   offerTitle?:          string | null;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+interface TableStateData {
+  status?:           string;
+  currentSessionId?: string | null;
+  currentOrderId?:   string | null;
+  reservedByUid?:    string | null;
+  occupiedByUid?:    string | null;
+}
 
 async function verifyAuthToken(
   request: NextRequest
@@ -138,8 +153,6 @@ export async function GET(request: NextRequest) {
 
     const userIsAdmin = await isAdminUser(verified.uid);
 
-    // Customer can ONLY see their own orders
-    // Admin can see any customer's orders or all orders
     const effectiveCustomerId = userIsAdmin
       ? (requestedId ?? null)
       : verified.uid;
@@ -187,7 +200,6 @@ export async function GET(request: NextRequest) {
     })) as Order[];
 
     return Response.json({ orders });
-
   } catch (error) {
     console.error("Orders GET error:", error);
     return Response.json(
@@ -204,19 +216,17 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
 
     const {
-      tableId:      rawTableId,
+      tableId:         rawTableId,
       customerId,
       customerName,
       customerPhone,
-      items         = [],
+      items            = [],
       notes,
       couponCode,
-      couponDiscount = 0,
-      tip            = 0,
-      restaurantId:  bodyRestaurantId = RESTAURANT_ID,
+      couponDiscount   = 0,
+      tip              = 0,
+      restaurantId: bodyRestaurantId = RESTAURANT_ID,
     } = body;
-
-    // ── Authentication ────────────────────────────────────────────────────────
 
     const verified = await verifyAuthToken(request);
 
@@ -231,10 +241,6 @@ export async function POST(request: NextRequest) {
     const loggedInName  = verified.name;
     const loggedInPhone = verified.phone;
 
-    // ── Table Required — QR scan enforce ─────────────────────────────────────
-    // Dine-in order ke liye tableId mandatory hai.
-    // Bina QR scan ke order place nahi ho sakta.
-
     if (!rawTableId) {
       return Response.json(
         {
@@ -245,12 +251,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ── Resolve Session ───────────────────────────────────────────────────────
-
-    let finalTableId:      string | null         = null;
+    let finalTableId:      string | null          = null;
     let finalTableNumber:  string | number | null = null;
     let finalRestaurantId  = bodyRestaurantId;
-    let sessionId:         string | null         = null;
+    let sessionId:         string | null          = null;
 
     const sessionSnap = await getDocs(
       query(
@@ -262,15 +266,13 @@ export async function POST(request: NextRequest) {
     );
 
     if (!sessionSnap.empty) {
-      const s               = sessionSnap.docs[0];
-      const sd              = s.data();
-      sessionId             = s.id;
-      finalTableId          = (sd.tableId      as string) || null;
-      finalTableNumber      = (sd.tableNumber  as string | number) || null;
-      finalRestaurantId     = (sd.restaurantId as string) || finalRestaurantId;
+      const s           = sessionSnap.docs[0];
+      const sd          = s.data();
+      sessionId         = s.id;
+      finalTableId      = (sd.tableId      as string) || null;
+      finalTableNumber  = (sd.tableNumber  as string | number) || null;
+      finalRestaurantId = (sd.restaurantId as string) || finalRestaurantId;
     }
-
-    // ── Resolve Table ─────────────────────────────────────────────────────────
 
     if (!finalTableId && rawTableId) {
       const resolved = await resolveTable(String(rawTableId));
@@ -285,54 +287,46 @@ export async function POST(request: NextRequest) {
       finalRestaurantId = (resolved.data?.restaurantId as string)    || finalRestaurantId;
     }
 
-    // ── Resolve Customer Info ─────────────────────────────────────────────────
-
     const finalCustomerId    = loggedInUid   || customerId   || null;
     const finalCustomerName  = loggedInName  || customerName  || "Guest";
     const finalCustomerPhone = loggedInPhone || customerPhone || "";
 
-    // ── Table Occupancy Check ─────────────────────────────────────────────────
+    // ── Strong table ownership / occupancy enforcement ──────────────────────
 
     if (finalTableId) {
       const tableSnap = await getDoc(doc(db, "tables", finalTableId));
 
       if (tableSnap.exists()) {
-        const tableData   = tableSnap.data() ?? {};
-        const tableStatus = (tableData.status as string) || "available";
+        const tableData   = (tableSnap.data() ?? {}) as TableStateData;
+        const tableStatus = tableData.status || "available";
 
-        if (tableStatus === "occupied") {
-          const isSameSession = sessionId && tableData.currentSessionId === sessionId;
-          const isSameUser    = finalCustomerId && tableData.occupiedByUid === finalCustomerId;
+        const sameSession      = Boolean(sessionId && tableData.currentSessionId === sessionId);
+        const sameReservedUser = Boolean(finalCustomerId && tableData.reservedByUid === finalCustomerId);
+        const sameOccupiedUser = Boolean(finalCustomerId && tableData.occupiedByUid === finalCustomerId);
 
-          if (!isSameSession && !isSameUser) {
-            return Response.json(
-              {
-                error:   "table_occupied",
-                message: "This table is currently occupied by another guest.",
-              },
-              { status: 409 }
-            );
-          }
-        }
-
-        if (
-          tableStatus === "reserved"  &&
-          sessionId                   &&
-          tableData.currentSessionId  &&
-          tableData.currentSessionId !== sessionId
-        ) {
+        // Reserved by someone else → block
+        if (tableStatus === "reserved" && !sameSession && !sameReservedUser) {
           return Response.json(
             {
-              error:   "table_reserved",
-              message: "This table is already reserved by another guest.",
+              error:   "table_in_use",
+              message: "This table is currently in use by another guest.",
+            },
+            { status: 409 }
+          );
+        }
+
+        // Occupied by someone else → block
+        if (tableStatus === "occupied" && !sameSession && !sameOccupiedUser) {
+          return Response.json(
+            {
+              error:   "table_occupied",
+              message: "This table already has an active order.",
             },
             { status: 409 }
           );
         }
       }
     }
-
-    // ── Validate Items ────────────────────────────────────────────────────────
 
     if (!Array.isArray(items) || items.length === 0) {
       return Response.json(
@@ -342,8 +336,6 @@ export async function POST(request: NextRequest) {
     }
 
     const normalizedItems = (items as RawOrderItem[]).map(normalizeItem);
-
-    // ── Calculate Totals ──────────────────────────────────────────────────────
 
     const grossSubtotal = normalizedItems.reduce(
       (sum, item) => sum + item.originalPrice * item.quantity,
@@ -364,8 +356,6 @@ export async function POST(request: NextRequest) {
     const total              = taxableAmount + cgst + sgst + safeTip;
     const orderNumber        = generateOrderNumber();
 
-    // ── Build Order Document ──────────────────────────────────────────────────
-
     const orderData = {
       restaurantId:    finalRestaurantId,
       orderNumber,
@@ -385,9 +375,9 @@ export async function POST(request: NextRequest) {
       promoDiscount:   computedPromoDiscount,
       tip:             safeTip,
       total,
-      couponCode:      couponCode   || null,
-      notes:           notes        || "",
-      status:          "pending"    as OrderStatus,
+      couponCode:      couponCode || null,
+      notes:           notes      || "",
+      status:          "pending"  as OrderStatus,
       paymentStatus:   "unpaid",
       paymentMode:     "cash",
       createdAt:       serverTimestamp(),
@@ -395,8 +385,6 @@ export async function POST(request: NextRequest) {
     };
 
     const docRef = await addDoc(collection(db, "orders"), orderData);
-
-    // ── Side Effects (parallel) ───────────────────────────────────────────────
 
     await Promise.allSettled([
       finalCustomerId
@@ -411,6 +399,7 @@ export async function POST(request: NextRequest) {
             ordersCount:  FieldValue.increment(1),
             totalSpent:   FieldValue.increment(total),
             lastActivity: serverTimestamp(),
+            updatedAt:    serverTimestamp(),
           })
         : Promise.resolve(),
 
@@ -419,9 +408,12 @@ export async function POST(request: NextRequest) {
             status:           "occupied",
             currentOrderId:   docRef.id,
             currentSessionId: sessionId,
-            occupiedBy:       finalCustomerName,
+            reservedByUid:    finalCustomerId,
+            reservedBy:       finalCustomerName,
             occupiedByUid:    finalCustomerId,
+            occupiedBy:       finalCustomerName,
             occupiedAt:       serverTimestamp(),
+            updatedAt:        serverTimestamp(),
           })
         : Promise.resolve(),
     ]);
@@ -437,7 +429,6 @@ export async function POST(request: NextRequest) {
       },
       { status: 201 }
     );
-
   } catch (error) {
     console.error("Order create error:", error);
     return Response.json(
