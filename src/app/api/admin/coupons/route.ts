@@ -4,8 +4,8 @@ import {
   db, collection, getDocs,
   addDoc, doc, deleteDoc, setDoc,
   query, where, serverTimestamp,
-  adminAuth,
 }                            from "@/lib/firebase-admin";
+import { verifyAdmin }       from "@/lib/auth/server-auth";
 import type { Coupon }       from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -23,28 +23,9 @@ const ALLOWED_COUPON_FIELDS = new Set([
   "validFrom", "validTo",
 ]);
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-async function verifyAdmin(request: Request): Promise<string | null> {
-  const req   = request as NextRequest;
-  const token = req.cookies.get("auth-token")?.value;
-  if (!token) return null;
-  try {
-    const decoded  = await adminAuth.verifyIdToken(token);
-    const userSnap = await getDocs(
-      query(collection(db, "users"), where("__name__", "==", decoded.uid))
-    );
-    if (userSnap.empty) return null;
-    const role = userSnap.docs[0].data().role as string;
-    return (role === "admin" || role === "super_admin") ? decoded.uid : null;
-  } catch {
-    return null;
-  }
-}
-
 // ─── GET /api/admin/coupons ───────────────────────────────────────────────────
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const restaurantId     = searchParams.get("restaurantId") ?? RESTAURANT_ID;
@@ -71,10 +52,10 @@ export async function GET(request: Request) {
 
 // ─── POST /api/admin/coupons ──────────────────────────────────────────────────
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const adminUid = await verifyAdmin(request);
-    if (!adminUid) {
+    const admin = await verifyAdmin(request);
+    if (!admin) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -95,11 +76,11 @@ export async function POST(request: Request) {
       restaurantId:  RESTAURANT_ID,
       code,
       description:   typeof body.description  === "string"  ? body.description  : "",
-      discountType:  typeof body.discountType  === "string"  ? body.discountType : "percentage",
+      discountType:  typeof body.discountType === "string"  ? body.discountType : "percentage",
       discountValue,
-      minOrderValue: typeof body.minOrderValue === "number"  ? body.minOrderValue : 0,
-      maxDiscount:   typeof body.maxDiscount   === "number"  ? body.maxDiscount   : null,
-      usageLimit:    typeof body.usageLimit    === "number"  ? body.usageLimit    : null,
+      minOrderValue: typeof body.minOrderValue === "number" ? body.minOrderValue : 0,
+      maxDiscount:   typeof body.maxDiscount   === "number" ? body.maxDiscount   : null,
+      usageLimit:    typeof body.usageLimit    === "number" ? body.usageLimit    : null,
       usageCount:    0,         // canonical field name — not usedCount
       isActive:      body.isActive !== false,
       validFrom:     null,
@@ -130,14 +111,14 @@ export async function POST(request: Request) {
 
 // ─── PUT /api/admin/coupons ───────────────────────────────────────────────────
 
-export async function PUT(request: Request) {
+export async function PUT(request: NextRequest) {
   try {
-    const adminUid = await verifyAdmin(request);
-    if (!adminUid) {
+    const admin = await verifyAdmin(request);
+    if (!admin) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body        = await request.json() as Record<string, unknown>;
+    const body           = await request.json() as Record<string, unknown>;
     const { id, ...raw } = body;
 
     if (!id || typeof id !== "string") {
@@ -175,10 +156,10 @@ export async function PUT(request: Request) {
 
 // ─── DELETE /api/admin/coupons ────────────────────────────────────────────────
 
-export async function DELETE(request: Request) {
+export async function DELETE(request: NextRequest) {
   try {
-    const adminUid = await verifyAdmin(request);
-    if (!adminUid) {
+    const admin = await verifyAdmin(request);
+    if (!admin) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 

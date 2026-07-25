@@ -12,12 +12,12 @@ import {
   getDoc,
   limit,
   orderBy,
-  adminAuth,
-} from "@/lib/firebase-admin";
-import { FieldValue } from "firebase-admin/firestore";
+}                                                            from "@/lib/firebase-admin";
+import { FieldValue }                                        from "firebase-admin/firestore";
+import { verifyAuthToken, isAdminUser }                      from "@/lib/auth/server-auth";
 import { generateOrderNumber, calculateCGST, calculateSGST } from "@/lib/utils";
-import type { Order, OrderStatus } from "@/lib/types";
-import { NextRequest } from "next/server";
+import type { Order, OrderStatus }                           from "@/lib/types";
+import { NextRequest }                                       from "next/server";
 
 export const dynamic = "force-dynamic";
 
@@ -55,31 +55,23 @@ interface TableStateData {
   occupiedByUid?:    string | null;
 }
 
-async function verifyAuthToken(
-  request: NextRequest
-): Promise<{ uid: string; name: string; phone: string } | null> {
-  const token = request.cookies.get("auth-token")?.value;
-  if (!token) return null;
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Fetches user profile from Firestore to get name and phone.
+ * Firebase token only has uid and email — name/phone come from user profile.
+ */
+async function getUserProfile(uid: string): Promise<{ name: string; phone: string }> {
   try {
-    const decoded = await adminAuth.verifyIdToken(token);
+    const snap = await getDoc(doc(db, "users", uid));
+    if (!snap.exists()) return { name: "", phone: "" };
+    const d = snap.data() ?? {};
     return {
-      uid:   decoded.uid,
-      name:  (decoded.name  as string) || "",
-      phone: (decoded.phone as string) || "",
+      name:  (d.name  as string) || (d.displayName as string) || "",
+      phone: (d.phone as string) || "",
     };
   } catch {
-    return null;
-  }
-}
-
-async function isAdminUser(uid: string): Promise<boolean> {
-  try {
-    const userSnap = await getDoc(doc(db, "users", uid));
-    if (!userSnap.exists()) return false;
-    const role = userSnap.data()?.role as string;
-    return role === "admin" || role === "super_admin";
-  } catch {
-    return false;
+    return { name: "", phone: "" };
   }
 }
 
@@ -153,6 +145,8 @@ export async function GET(request: NextRequest) {
 
     const userIsAdmin = await isAdminUser(verified.uid);
 
+    // Customer can only see their own orders
+    // Admin can see any customer's orders
     const effectiveCustomerId = userIsAdmin
       ? (requestedId ?? null)
       : verified.uid;
@@ -237,9 +231,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Get name and phone from user profile (not in Firebase token)
+    const profile       = await getUserProfile(verified.uid);
     const loggedInUid   = verified.uid;
-    const loggedInName  = verified.name;
-    const loggedInPhone = verified.phone;
+    const loggedInName  = profile.name;
+    const loggedInPhone = profile.phone;
 
     if (!rawTableId) {
       return Response.json(

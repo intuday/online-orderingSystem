@@ -1,10 +1,10 @@
 // src/app/api/admin/reports/route.ts
-import { NextRequest }         from "next/server";
+import { NextRequest }           from "next/server";
 import {
   db, collection, getDocs,
   query, where, orderBy, limit,
-  adminAuth,
-}                              from "@/lib/firebase-admin";
+}                                from "@/lib/firebase-admin";
+import { verifyAdmin }           from "@/lib/auth/server-auth";
 import type { Order, OrderItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -40,29 +40,12 @@ function extractMs(value: unknown): number {
   return 0;
 }
 
-async function verifyAdmin(request: Request): Promise<boolean> {
-  const req   = request as NextRequest;
-  const token = req.cookies.get("auth-token")?.value;
-  if (!token) return false;
-  try {
-    const decoded  = await adminAuth.verifyIdToken(token);
-    const userSnap = await getDocs(
-      query(collection(db, "users"), where("__name__", "==", decoded.uid))
-    );
-    if (userSnap.empty) return false;
-    const role = userSnap.docs[0].data().role as string;
-    return role === "admin" || role === "super_admin";
-  } catch {
-    return false;
-  }
-}
-
 // ─── Route Handler ────────────────────────────────────────────────────────────
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
-    const isAdmin = await verifyAdmin(request);
-    if (!isAdmin) {
+    const admin = await verifyAdmin(request);
+    if (!admin) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -108,7 +91,7 @@ export async function GET(request: Request) {
     let paidCount       = 0;
     let unpaidCount     = 0;
 
-    const ordersByStatus: Record<string, number>                          = {};
+    const ordersByStatus: Record<string, number>                              = {};
     const chartMap:       Record<string, { orders: number; revenue: number }> = {};
     const itemMap:        Record<string, { id: string; name: string; price: number; orderCount: number; revenue: number }> = {};
 

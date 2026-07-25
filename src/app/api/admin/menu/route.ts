@@ -4,8 +4,9 @@ import {
   db, collection, getDocs,
   addDoc, doc, updateDoc, deleteDoc,
   query, where, orderBy,
-  serverTimestamp, adminAuth,
+  serverTimestamp,
 }                         from "@/lib/firebase-admin";
+import { verifyAdmin }    from "@/lib/auth/server-auth";
 import { slugify }        from "@/lib/utils";
 import type { MenuItem }  from "@/lib/types";
 
@@ -27,28 +28,9 @@ const ALLOWED_MENU_FIELDS = new Set([
   "variants", "addons", "sortOrder",
 ]);
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-async function verifyAdmin(request: Request): Promise<string | null> {
-  const req   = request as NextRequest;
-  const token = req.cookies.get("auth-token")?.value;
-  if (!token) return null;
-  try {
-    const decoded  = await adminAuth.verifyIdToken(token);
-    const userSnap = await getDocs(
-      query(collection(db, "users"), where("__name__", "==", decoded.uid))
-    );
-    if (userSnap.empty) return null;
-    const role = userSnap.docs[0].data().role as string;
-    return (role === "admin" || role === "super_admin") ? decoded.uid : null;
-  } catch {
-    return null;
-  }
-}
-
 // ─── GET /api/admin/menu ──────────────────────────────────────────────────────
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const restaurantId     = searchParams.get("restaurantId") ?? RESTAURANT_ID;
@@ -76,10 +58,10 @@ export async function GET(request: Request) {
 
 // ─── POST /api/admin/menu ─────────────────────────────────────────────────────
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const adminUid = await verifyAdmin(request);
-    if (!adminUid) {
+    const admin = await verifyAdmin(request);
+    if (!admin) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -109,10 +91,10 @@ export async function POST(request: Request) {
       restaurantId,
       name,
       slug:           slugify(name),
-      description:    typeof body.description  === "string"  ? body.description  : "",
+      description:    typeof body.description  === "string" ? body.description  : "",
       price,
-      comparePrice:   typeof body.comparePrice === "number"  ? body.comparePrice : null,
-      image:          typeof body.image        === "string"  ? body.image        : "",
+      comparePrice:   typeof body.comparePrice === "number" ? body.comparePrice : null,
+      image:          typeof body.image        === "string" ? body.image        : "",
       categoryId,
       isVeg:          body.isVeg          !== false,
       isAvailable:    body.isAvailable    !== false,
@@ -123,10 +105,10 @@ export async function POST(request: Request) {
       spiceLevel:     typeof body.spiceLevel === "number" ? body.spiceLevel : 0,
       prepTime:       typeof body.prepTime   === "number" ? body.prepTime   : 15,
       calories:       typeof body.calories   === "number" ? body.calories   : null,
-      allergens:      Array.isArray(body.allergens)    ? body.allergens    : [],
-      ingredients:    Array.isArray(body.ingredients)  ? body.ingredients  : [],
-      variants:       Array.isArray(body.variants)     ? body.variants     : [],
-      addons:         Array.isArray(body.addons)       ? body.addons       : [],
+      allergens:      Array.isArray(body.allergens)   ? body.allergens   : [],
+      ingredients:    Array.isArray(body.ingredients) ? body.ingredients : [],
+      variants:       Array.isArray(body.variants)    ? body.variants    : [],
+      addons:         Array.isArray(body.addons)      ? body.addons      : [],
       rating:         0,
       reviewCount:    0,
       orderCount:     0,
@@ -157,14 +139,14 @@ export async function POST(request: Request) {
 
 // ─── PUT /api/admin/menu ──────────────────────────────────────────────────────
 
-export async function PUT(request: Request) {
+export async function PUT(request: NextRequest) {
   try {
-    const adminUid = await verifyAdmin(request);
-    if (!adminUid) {
+    const admin = await verifyAdmin(request);
+    if (!admin) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body        = await request.json() as Record<string, unknown>;
+    const body           = await request.json() as Record<string, unknown>;
     const { id, ...raw } = body;
 
     if (!id || typeof id !== "string") {
@@ -203,10 +185,10 @@ export async function PUT(request: Request) {
 
 // ─── DELETE /api/admin/menu ───────────────────────────────────────────────────
 
-export async function DELETE(request: Request) {
+export async function DELETE(request: NextRequest) {
   try {
-    const adminUid = await verifyAdmin(request);
-    if (!adminUid) {
+    const admin = await verifyAdmin(request);
+    if (!admin) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 

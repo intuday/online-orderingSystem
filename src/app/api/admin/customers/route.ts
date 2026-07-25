@@ -5,7 +5,7 @@ import {
   doc, updateDoc, deleteDoc,
   query, where, orderBy, limit,
 }                              from "@/lib/firebase-admin";
-import { adminAuth }           from "@/lib/firebase-admin";
+import { verifyAdmin }         from "@/lib/auth/server-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -49,30 +49,6 @@ function extractSeconds(value: unknown): number {
   if (typeof v._seconds === "number") return v._seconds;
   if (typeof v.seconds  === "number") return v.seconds;
   return 0;
-}
-
-/**
- * Verifies the auth-token cookie and returns uid if admin/super_admin.
- * Returns null if unauthorized.
- */
-async function verifyAdmin(request: Request): Promise<string | null> {
-  const req   = request as NextRequest;
-  const token = req.cookies.get("auth-token")?.value;
-  if (!token) return null;
-
-  try {
-    const decoded  = await adminAuth.verifyIdToken(token);
-    const uid      = decoded.uid;
-    const userSnap = await getDocs(
-      query(collection(db, "users"), where("__name__", "==", uid))
-    );
-    if (userSnap.empty) return null;
-    const role = userSnap.docs[0].data().role as string;
-    if (role !== "admin" && role !== "super_admin") return null;
-    return uid;
-  } catch {
-    return null;
-  }
 }
 
 // ─── GET /api/admin/customers ─────────────────────────────────────────────────
@@ -129,7 +105,7 @@ export async function GET() {
       ];
 
       // Deduplicate by order id
-      const seen        = new Set<string>();
+      const seen         = new Set<string>();
       const uniqueOrders = customerOrders.filter((o) => {
         if (seen.has(o.id)) return false;
         seen.add(o.id);
@@ -177,8 +153,8 @@ export async function GET() {
         phone,
         totalOrders:     guestOrders.length,
         totalSpent:      guestOrders.reduce((s, o) => s + (Number(o.total) || 0), 0),
-        lastOrderAt:     lastOrder?.createdAt   ?? null,
-        lastOrderStatus: lastOrder?.status      ?? null,
+        lastOrderAt:     lastOrder?.createdAt      ?? null,
+        lastOrderStatus: lastOrder?.status         ?? null,
         createdAt:       sortedGuest[0]?.createdAt ?? order.createdAt ?? null,
         source:          "guest",
       });
@@ -201,10 +177,10 @@ export async function GET() {
 
 // ─── PUT /api/admin/customers ─────────────────────────────────────────────────
 
-export async function PUT(request: Request) {
+export async function PUT(request: NextRequest) {
   try {
-    const adminUid = await verifyAdmin(request);
-    if (!adminUid) {
+    const admin = await verifyAdmin(request);
+    if (!admin) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -242,10 +218,10 @@ export async function PUT(request: Request) {
 
 // ─── DELETE /api/admin/customers ──────────────────────────────────────────────
 
-export async function DELETE(request: Request) {
+export async function DELETE(request: NextRequest) {
   try {
-    const adminUid = await verifyAdmin(request);
-    if (!adminUid) {
+    const admin = await verifyAdmin(request);
+    if (!admin) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 

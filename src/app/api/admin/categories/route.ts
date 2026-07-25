@@ -1,13 +1,14 @@
 // src/app/api/admin/categories/route.ts
-import { NextRequest }      from "next/server";
+import { NextRequest }        from "next/server";
 import {
   db, collection, getDocs,
   addDoc, doc, updateDoc, deleteDoc,
   query, where, orderBy,
-  serverTimestamp, adminAuth,
-}                           from "@/lib/firebase-admin";
-import { slugify }          from "@/lib/utils";
-import type { Category }    from "@/lib/types";
+  serverTimestamp,
+}                             from "@/lib/firebase-admin";
+import { verifyAdmin }        from "@/lib/auth/server-auth";
+import { slugify }            from "@/lib/utils";
+import type { Category }      from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -22,28 +23,9 @@ const ALLOWED_FIELDS = new Set([
   "name", "icon", "image", "sortOrder", "isActive", "slug",
 ]);
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-async function verifyAdmin(request: Request): Promise<string | null> {
-  const req   = request as NextRequest;
-  const token = req.cookies.get("auth-token")?.value;
-  if (!token) return null;
-  try {
-    const decoded  = await adminAuth.verifyIdToken(token);
-    const userSnap = await getDocs(
-      query(collection(db, "users"), where("__name__", "==", decoded.uid))
-    );
-    if (userSnap.empty) return null;
-    const role = userSnap.docs[0].data().role as string;
-    return (role === "admin" || role === "super_admin") ? decoded.uid : null;
-  } catch {
-    return null;
-  }
-}
-
 // ─── GET /api/admin/categories ────────────────────────────────────────────────
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const restaurantId     = searchParams.get("restaurantId") ?? RESTAURANT_ID;
@@ -71,10 +53,10 @@ export async function GET(request: Request) {
 
 // ─── POST /api/admin/categories ───────────────────────────────────────────────
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const adminUid = await verifyAdmin(request);
-    if (!adminUid) {
+    const admin = await verifyAdmin(request);
+    if (!admin) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -122,14 +104,14 @@ export async function POST(request: Request) {
 
 // ─── PUT /api/admin/categories ────────────────────────────────────────────────
 
-export async function PUT(request: Request) {
+export async function PUT(request: NextRequest) {
   try {
-    const adminUid = await verifyAdmin(request);
-    if (!adminUid) {
+    const admin = await verifyAdmin(request);
+    if (!admin) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body        = await request.json() as Record<string, unknown>;
+    const body           = await request.json() as Record<string, unknown>;
     const { id, ...raw } = body;
 
     if (!id || typeof id !== "string") {
@@ -168,10 +150,10 @@ export async function PUT(request: Request) {
 
 // ─── DELETE /api/admin/categories ────────────────────────────────────────────
 
-export async function DELETE(request: Request) {
+export async function DELETE(request: NextRequest) {
   try {
-    const adminUid = await verifyAdmin(request);
-    if (!adminUid) {
+    const admin = await verifyAdmin(request);
+    if (!admin) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 

@@ -1,12 +1,11 @@
 // src/app/api/admin/offers/route.ts
-import { NextRequest }         from "next/server";
+import { NextRequest }    from "next/server";
 import {
   db, collection, getDocs,
   addDoc, doc, deleteDoc, setDoc,
   query, where, serverTimestamp,
-  adminAuth,
-}                              from "@/lib/firebase-admin";
-import type { OfferRule }      from "@/lib/types";
+}                         from "@/lib/firebase-admin";
+import { verifyAdmin }    from "@/lib/auth/server-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -18,36 +17,18 @@ const RESTAURANT_ID =
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-async function verifyAdmin(request: Request): Promise<string | null> {
-  const req   = request as NextRequest;
-  const token = req.cookies.get("auth-token")?.value;
-  if (!token) return null;
-  try {
-    const decoded  = await adminAuth.verifyIdToken(token);
-    const userSnap = await getDocs(
-      query(collection(db, "users"), where("__name__", "==", decoded.uid))
-    );
-    if (userSnap.empty) return null;
-    const role = userSnap.docs[0].data().role as string;
-    if (role !== "admin" && role !== "super_admin") return null;
-    return decoded.uid;
-  } catch {
-    return null;
-  }
-}
-
 function buildOfferData(
   body: Record<string, unknown>,
   restaurantId: string
 ): Record<string, unknown> {
   return {
     restaurantId,
-    title:            typeof body.title         === "string"  ? body.title         : "",
-    description:      typeof body.description   === "string"  ? body.description   : "",
-    image:            typeof body.image         === "string"  ? body.image         : "",
-    offerType:        typeof body.offerType     === "string"  ? body.offerType     : "discount",
-    discountType:     typeof body.discountType  === "string"  ? body.discountType  : "percentage",
-    discountValue:    typeof body.discountValue === "number"  ? body.discountValue : 0,
+    title:            typeof body.title         === "string" ? body.title         : "",
+    description:      typeof body.description   === "string" ? body.description   : "",
+    image:            typeof body.image         === "string" ? body.image         : "",
+    offerType:        typeof body.offerType     === "string" ? body.offerType     : "discount",
+    discountType:     typeof body.discountType  === "string" ? body.discountType  : "percentage",
+    discountValue:    typeof body.discountValue === "number" ? body.discountValue : 0,
     condition: body.condition ?? {
       requiredItemIds:     [],
       requiredCategoryIds: [],
@@ -73,7 +54,7 @@ function buildOfferData(
 
 // ─── GET /api/admin/offers ────────────────────────────────────────────────────
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const restaurantId     = searchParams.get("restaurantId") ?? RESTAURANT_ID;
@@ -97,15 +78,15 @@ export async function GET(request: Request) {
 
 // ─── POST /api/admin/offers ───────────────────────────────────────────────────
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const adminUid = await verifyAdmin(request);
-    if (!adminUid) {
+    const admin = await verifyAdmin(request);
+    if (!admin) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body       = await request.json() as Record<string, unknown>;
-    const offerData  = {
+    const body      = await request.json() as Record<string, unknown>;
+    const offerData = {
       ...buildOfferData(body, RESTAURANT_ID),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -134,10 +115,10 @@ export async function POST(request: Request) {
 
 // ─── PUT /api/admin/offers ────────────────────────────────────────────────────
 
-export async function PUT(request: Request) {
+export async function PUT(request: NextRequest) {
   try {
-    const adminUid = await verifyAdmin(request);
-    if (!adminUid) {
+    const admin = await verifyAdmin(request);
+    if (!admin) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -171,10 +152,10 @@ export async function PUT(request: Request) {
 
 // ─── DELETE /api/admin/offers ─────────────────────────────────────────────────
 
-export async function DELETE(request: Request) {
+export async function DELETE(request: NextRequest) {
   try {
-    const adminUid = await verifyAdmin(request);
-    if (!adminUid) {
+    const admin = await verifyAdmin(request);
+    if (!admin) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 

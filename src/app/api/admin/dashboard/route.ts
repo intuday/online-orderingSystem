@@ -1,9 +1,11 @@
 // src/app/api/admin/dashboard/route.ts
+import { NextRequest }              from "next/server";
 import {
   db, collection, getDocs,
   query, where, orderBy, limit,
-}                        from "@/lib/firebase-admin";
-import type { Order, MenuItem } from "@/lib/types";
+}                                   from "@/lib/firebase-admin";
+import { verifyAdmin }              from "@/lib/auth/server-auth";
+import type { Order, MenuItem }     from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -40,8 +42,17 @@ function toDate(value: unknown): Date | null {
 
 // ─── Route Handler ────────────────────────────────────────────────────────────
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
+    // ✅ CRITICAL: Admin auth check — public exposure fix
+    const admin = await verifyAdmin(request);
+    if (!admin) {
+      return Response.json(
+        { error: "Unauthorized. Admin access required." },
+        { status: 401 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
     const restaurantId     =
       searchParams.get("restaurantId")      ??

@@ -4,8 +4,9 @@ import {
   db, collection, getDocs,
   addDoc, doc, updateDoc, deleteDoc,
   getDoc, query, where,
-  serverTimestamp, adminAuth,
+  serverTimestamp,
 }                               from "@/lib/firebase-admin";
+import { verifyAdmin }          from "@/lib/auth/server-auth";
 import QRCode                   from "qrcode";
 import { signTableQrToken }     from "@/lib/qr-token";
 import type { Table }           from "@/lib/types";
@@ -45,23 +46,6 @@ interface RawTableData {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-async function verifyAdmin(request: Request): Promise<string | null> {
-  const req   = request as NextRequest;
-  const token = req.cookies.get("auth-token")?.value;
-  if (!token) return null;
-  try {
-    const decoded  = await adminAuth.verifyIdToken(token);
-    const userSnap = await getDocs(
-      query(collection(db, "users"), where("__name__", "==", decoded.uid))
-    );
-    if (userSnap.empty) return null;
-    const role = userSnap.docs[0].data().role as string;
-    return (role === "admin" || role === "super_admin") ? decoded.uid : null;
-  } catch {
-    return null;
-  }
-}
-
 async function generateQrCode(
   restaurantId: string,
   tableId:      string,
@@ -96,7 +80,7 @@ function normalizeTable(id: string, data: RawTableData, restaurantId: string): T
 
 // ─── GET /api/admin/tables ────────────────────────────────────────────────────
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const restaurantId     = searchParams.get("restaurantId") ?? RESTAURANT_ID;
@@ -131,10 +115,10 @@ export async function GET(request: Request) {
 
 // ─── POST /api/admin/tables ───────────────────────────────────────────────────
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const adminUid = await verifyAdmin(request);
-    if (!adminUid) {
+    const admin = await verifyAdmin(request);
+    if (!admin) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -205,10 +189,10 @@ export async function POST(request: Request) {
 
 // ─── PATCH /api/admin/tables — Regenerate QR ─────────────────────────────────
 
-export async function PATCH(request: Request) {
+export async function PATCH(request: NextRequest) {
   try {
-    const adminUid = await verifyAdmin(request);
-    if (!adminUid) {
+    const admin = await verifyAdmin(request);
+    if (!admin) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -260,14 +244,14 @@ export async function PATCH(request: Request) {
 
 // ─── PUT /api/admin/tables — Update table details ─────────────────────────────
 
-export async function PUT(request: Request) {
+export async function PUT(request: NextRequest) {
   try {
-    const adminUid = await verifyAdmin(request);
-    if (!adminUid) {
+    const admin = await verifyAdmin(request);
+    if (!admin) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body        = await request.json() as Record<string, unknown>;
+    const body           = await request.json() as Record<string, unknown>;
     const { id, ...raw } = body;
 
     if (!id || typeof id !== "string") {
@@ -301,10 +285,10 @@ export async function PUT(request: Request) {
 
 // ─── DELETE /api/admin/tables ─────────────────────────────────────────────────
 
-export async function DELETE(request: Request) {
+export async function DELETE(request: NextRequest) {
   try {
-    const adminUid = await verifyAdmin(request);
-    if (!adminUid) {
+    const admin = await verifyAdmin(request);
+    if (!admin) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 

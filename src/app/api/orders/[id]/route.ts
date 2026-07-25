@@ -1,9 +1,9 @@
 // src/app/api/orders/[id]/route.ts
-import { NextRequest, NextResponse }              from "next/server";
+import { NextRequest, NextResponse }                    from "next/server";
 import {
   db, doc, getDoc, updateDoc, serverTimestamp,
-}                                                 from "@/lib/firebase-admin";
-import { adminAuth }                              from "@/lib/firebase-admin";
+}                                                       from "@/lib/firebase-admin";
+import { verifyAuthToken }                              from "@/lib/auth/server-auth";
 import type { OrderStatus, PaymentStatus, PaymentMode } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -32,23 +32,6 @@ interface ExistingOrderData {
   sessionId?: string;
   status?:    OrderStatus;
   [key: string]: unknown;
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Verifies the Firebase ID token from the auth-token cookie.
- * Returns uid if valid, null if missing or invalid.
- */
-async function getAuthenticatedUid(request: NextRequest): Promise<string | null> {
-  const token = request.cookies.get("auth-token")?.value;
-  if (!token) return null;
-  try {
-    const decoded = await adminAuth.verifyIdToken(token);
-    return decoded.uid;
-  } catch {
-    return null;
-  }
 }
 
 // ─── GET /api/orders/[id] ─────────────────────────────────────────────────────
@@ -81,8 +64,8 @@ export async function PATCH(
 ) {
   try {
     // ── Authentication ──────────────────────────────────────────────────────
-    const uid = await getAuthenticatedUid(request);
-    if (!uid) {
+    const verified = await verifyAuthToken(request);
+    if (!verified) {
       return NextResponse.json(
         { error: "Unauthorized" },
         { status: 401 }

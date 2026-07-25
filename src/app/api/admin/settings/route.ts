@@ -2,9 +2,9 @@
 import { NextRequest }           from "next/server";
 import {
   db, doc, getDoc, setDoc,
-  serverTimestamp, adminAuth,
-  collection, getDocs, query, where,
+  serverTimestamp,
 }                                from "@/lib/firebase-admin";
+import { verifyAdmin }           from "@/lib/auth/server-auth";
 import type { Restaurant }       from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -23,28 +23,9 @@ const ALLOWED_SETTINGS_FIELDS = new Set([
   "acceptCash", "acceptCard",
 ]);
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-async function verifyAdmin(request: Request): Promise<string | null> {
-  const req   = request as NextRequest;
-  const token = req.cookies.get("auth-token")?.value;
-  if (!token) return null;
-  try {
-    const decoded  = await adminAuth.verifyIdToken(token);
-    const userSnap = await getDocs(
-      query(collection(db, "users"), where("__name__", "==", decoded.uid))
-    );
-    if (userSnap.empty) return null;
-    const role = userSnap.docs[0].data().role as string;
-    return (role === "admin" || role === "super_admin") ? decoded.uid : null;
-  } catch {
-    return null;
-  }
-}
-
 // ─── GET /api/admin/settings ──────────────────────────────────────────────────
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const restaurantId     = searchParams.get("restaurantId") ?? RESTAURANT_ID;
@@ -85,10 +66,10 @@ export async function GET(request: Request) {
 
 // ─── PUT /api/admin/settings ──────────────────────────────────────────────────
 
-export async function PUT(request: Request) {
+export async function PUT(request: NextRequest) {
   try {
-    const adminUid = await verifyAdmin(request);
-    if (!adminUid) {
+    const admin = await verifyAdmin(request);
+    if (!admin) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 

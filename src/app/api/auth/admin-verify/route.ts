@@ -6,74 +6,50 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import {
-  adminAuth, db,
+  db,
   doc, getDoc,
 }                                    from "@/lib/firebase-admin";
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const ADMIN_ROLES = new Set(["admin", "super_admin"]);
+import { verifyAdmin }               from "@/lib/auth/server-auth";
 
 // ─── Route Handler ────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
   try {
-    // ── Read Token ──────────────────────────────────────────────────────────
-    // Single auth-token cookie — no separate admin-token.
+    // ── Verify Admin (token + role) ─────────────────────────────────────────
 
-    const token = req.cookies.get("auth-token")?.value;
+    const admin = await verifyAdmin(req);
 
-    if (!token) {
-      return NextResponse.json({ valid: false }, { status: 401 });
-    }
-
-    // ── Verify Firebase ID Token ────────────────────────────────────────────
-
-    let uid: string;
-    try {
-      const decoded = await adminAuth.verifyIdToken(token);
-      uid           = decoded.uid;
-    } catch {
-      // Token invalid or expired
-      const response = NextResponse.json({ valid: false }, { status: 401 });
-      response.cookies.set("auth-token", "", {
-        httpOnly: true,
-        secure:   process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge:   0,
-        path:     "/",
-      });
+    if (!admin) {
+      // Not authenticated OR not an admin — clear cookie to be safe
+      const response = NextResponse.json(
+        { valid: false, error: "Admin privileges required" },
+        { status: 401 }
+      );
+      // Clear cookie only if token was present but invalid
+      if (req.cookies.get("auth-token")?.value) {
+        response.cookies.set("auth-token", "", {
+          httpOnly: true,
+          secure:   process.env.NODE_ENV === "production",
+          sameSite: "lax",
+          maxAge:   0,
+          path:     "/",
+        });
+      }
       return response;
     }
 
-    // ── Read Profile from Firestore ─────────────────────────────────────────
-    // Role is stored in Firestore — not in the Firebase ID token.
+    // ── Read full profile for name and restaurantId ─────────────────────────
 
-    const userSnap = await getDoc(doc(db, "users", uid));
-
-    if (!userSnap.exists()) {
-      return NextResponse.json({ valid: false }, { status: 403 });
-    }
-
-    const profile = userSnap.data() ?? {};
-    const role    = (profile.role as string) ?? "customer";
-
-    // ── Role Check ──────────────────────────────────────────────────────────
-
-    if (!ADMIN_ROLES.has(role)) {
-      return NextResponse.json(
-        { valid: false, error: "Admin privileges required" },
-        { status: 403 }
-      );
-    }
+    const userSnap = await getDoc(doc(db, "users", admin.uid));
+    const profile  = userSnap.exists() ? (userSnap.data() ?? {}) : {};
 
     return NextResponse.json({
       valid:        true,
-      uid,
-      email:        (profile.email        as string) ?? null,
-      role,
-      name:         (profile.name         as string) ?? "",
-      restaurantId: (profile.restaurantId as string) ?? "",
+      uid:          admin.uid,
+      email:        admin.email                          || null,
+      role:         admin.role,
+      name:         (profile.name         as string)     ?? "",
+      restaurantId: (profile.restaurantId as string)     ?? "",
     });
 
   } catch (error) {
