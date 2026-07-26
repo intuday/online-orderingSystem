@@ -370,16 +370,32 @@ export default function MenuPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-3">
           <div className="space-y-3 lg:grid lg:grid-cols-[minmax(280px,360px)_1fr] lg:items-center lg:gap-4 lg:space-y-0">
             <div className="flex items-center justify-between lg:pr-2">
-              <div className="flex min-w-0 flex-col">
-                <div className="flex items-center gap-1.5">
-                  <div className="h-2 w-2 rounded-full bg-orange-500 animate-pulse" />
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-orange-500">
-                    {displayTable || "Menu"}
-                  </span>
+                           <div className="flex items-center gap-3 min-w-0">
+                {/* Restaurant Logo */}
+                {data?.restaurant?.logo ? (
+                  <img
+                    src={data.restaurant.logo}
+                    alt={data?.restaurant?.name ?? "Logo"}
+                    className="h-10 w-10 rounded-xl object-cover shrink-0 shadow-sm"
+                  />
+                ) : (
+                  <div className="h-10 w-10 rounded-xl bg-orange-500 flex items-center justify-center shrink-0 shadow-sm">
+                    <span className="text-white text-sm font-black">
+                      {(data?.restaurant?.name || "R").charAt(0)}
+                    </span>
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <div className="h-1.5 w-1.5 rounded-full bg-orange-500 animate-pulse" />
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-orange-500">
+                      {displayTable || "Menu"}
+                    </span>
+                  </div>
+                  <h1 className="mt-0.5 truncate text-[16px] font-black leading-tight text-slate-900 sm:text-[18px]">
+                    {data?.restaurant?.name || "Restaurant"}
+                  </h1>
                 </div>
-                <h1 className="mt-0.5 truncate text-[18px] font-black leading-tight text-slate-900 sm:text-[20px]">
-                  {data?.restaurant?.name || "Restaurant"}
-                </h1>
               </div>
 
               <div className="flex items-center gap-2.5">

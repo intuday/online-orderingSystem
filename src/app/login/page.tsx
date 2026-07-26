@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, Suspense }          from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams }  from "next/navigation";
 import { motion, AnimatePresence }     from "framer-motion";
 import {
@@ -66,6 +66,22 @@ function LoginContent() {
   const [resent, setResent]       = useState(false);
   const [resetSent, setResetSent] = useState(false);
   const [userRole, setUserRole]   = useState("customer");
+
+    const [cafeName, setCafeName]     = useState("");
+  const [cafeTagline, setCafeTagline] = useState("");
+  const [cafeLogo, setCafeLogo]     = useState("");
+
+  // Fetch restaurant name dynamically
+  useEffect(() => {
+    fetch("/api/restaurant")
+      .then((r) => r.json())
+      .then((d) => {
+        setCafeName(d.restaurant?.name        ?? "");
+        setCafeTagline(d.restaurant?.description ?? "");
+        setCafeLogo(d.restaurant?.logo        ?? "");
+      })
+      .catch(() => {});
+  }, []);
 
   const buildRedirect = (role: string): string => {
     if (redirectTo) return redirectTo;
@@ -259,20 +275,32 @@ function LoginContent() {
 
       {/* Brand Header */}
       <div className="pt-10 pb-6 px-6 text-center">
-        <motion.div
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl mx-auto flex items-center justify-center mb-3 shadow-lg"
-        >
-          <UtensilsCrossed className="w-8 h-8 text-white" />
-        </motion.div>
+        
+            {cafeLogo ? (
+          <motion.div
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="w-16 h-16 rounded-2xl overflow-hidden shadow-lg mb-3 mx-auto border-2 border-white/20"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={cafeLogo} alt={cafeName} className="w-full h-full object-cover" />
+          </motion.div>
+        ) : (
+          <motion.div
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl mx-auto flex items-center justify-center mb-3 shadow-lg"
+          >
+            <UtensilsCrossed className="w-8 h-8 text-white" />
+          </motion.div>
+        )}
         <motion.h1
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
           className="text-2xl font-bold text-white"
         >
-          The Royal Kitchen
+          {cafeName || "Welcome"}
         </motion.h1>
         <motion.p
           initial={{ opacity: 0 }}
@@ -280,8 +308,9 @@ function LoginContent() {
           transition={{ delay: 0.2 }}
           className="text-white/70 text-sm mt-1"
         >
-          Premium Dining Experience
+          {cafeTagline || "Premium Dining Experience"}
         </motion.p>
+
         {tableId && (
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}

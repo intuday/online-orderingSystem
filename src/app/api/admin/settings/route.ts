@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
 
     // Return default shape if restaurant document does not exist yet
     const defaultRestaurant: Partial<Restaurant> = {
-      name:         "The Royal Kitchen",
+      name:         "Restaurant",
       description:  "Premium dining experience",
       logo:         "",
       address:      "123 MG Road, Bangalore",

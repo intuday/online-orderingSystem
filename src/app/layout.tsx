@@ -20,8 +20,7 @@ const inter = Inter({
 // ─── Metadata ────────────────────────────────────────────────────────────────
 
 export const metadata: Metadata = {
-  title:       "The Royal Kitchen - Premium Dining",
-  description: "Scan, Order & Enjoy. Premium restaurant ordering experience.",
+  title:       "Restaurant - Scan, Order & Enjoy",  description: "Scan, Order & Enjoy. Premium restaurant ordering experience.",
   manifest:    "/manifest.json",
   icons:       { icon: "/icon.svg" },
 };

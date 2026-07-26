@@ -6,7 +6,7 @@ import { Save, Store, Receipt, CreditCard, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Restaurant } from "@/lib/types";
-
+import { ImageUploader } from "@/components/ImageUploader";
 export default function SettingsPage() {
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null);
   const [loading, setLoading] = useState(true);
@@ -108,10 +108,13 @@ export default function SettingsPage() {
             <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="w-full h-10 px-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
           </div>
         </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Logo URL</label>
-          <input value={form.logo} onChange={(e) => setForm({ ...form, logo: e.target.value })} className="w-full h-10 px-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
-        </div>
+               <ImageUploader
+          label="Restaurant Logo"
+          value={form.logo}
+          onChange={(url) => setForm({ ...form, logo: url })}
+          folder="menu"
+          helpText="Upload your restaurant logo or paste URL"
+        />
       </div>
 
       {/* Tax & GST */}
