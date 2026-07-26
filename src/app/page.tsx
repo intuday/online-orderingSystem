@@ -29,10 +29,12 @@ export default function HomePage() {
     return () => clearTimeout(timer);
   }, [router]);
 
-  const name    = restaurant?.name        ?? "Welcome";
-  const tagline = restaurant?.description ?? "Premium Cafe Experience";
-  const logo    = restaurant?.logo        ?? "";
-  const address = restaurant?.address     ?? "";
+  const isLoading = restaurant === null;
+  const name      = restaurant?.name        ?? "Welcome";
+  const tagline   = restaurant?.description ?? "Premium Cafe Experience";
+  const logo      = restaurant?.logo        ?? "";
+  const address   = restaurant?.address     ?? "";
+
 
   return (
     <div className="min-h-screen relative overflow-hidden bg-[#0f0906]">
@@ -122,18 +124,21 @@ export default function HomePage() {
         </motion.div>
 
         {/* Logo */}
+        {/* Logo */}
         <motion.div
           initial={{ scale: 0, rotate: -180 }}
           animate={{ scale: 1, rotate: 0 }}
           transition={{ type: "spring", stiffness: 150, damping: 12, delay: 0.3 }}
         >
-          {logo ? (
+          {isLoading ? (
+            /* Skeleton while loading — prevents "RK" flash */
+            <div className="w-32 h-32 sm:w-36 sm:h-36 rounded-[28px] bg-orange-900/30 animate-pulse" />
+          ) : logo ? (
             <div className="relative">
               <div className="w-32 h-32 sm:w-36 sm:h-36 rounded-[28px] overflow-hidden shadow-2xl shadow-orange-900/40 border-2 border-orange-400/15">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={logo} alt={name} className="w-full h-full object-cover" />
               </div>
-              {/* Glow behind logo */}
               <div className="absolute inset-0 rounded-[28px] bg-orange-400/10 blur-2xl -z-10 scale-125" />
             </div>
           ) : (

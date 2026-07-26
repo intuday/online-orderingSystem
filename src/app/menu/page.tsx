@@ -1051,8 +1051,8 @@ function MenuItemCard({
             </motion.div>
           ) : (
             <motion.button whileTap={{ scale: 0.92 }} onClick={handleQuickAdd}
-              className="rounded-[10px] border-2 border-orange-400 bg-white px-5 text-[12px] font-black text-orange-500 shadow-md transition-all duration-200 hover:border-orange-500 hover:bg-orange-500 hover:text-white"
-              style={{ height: 32 }}>
+              className="rounded-[10px] border-2 border-orange-400 bg-white px-4 py-1.5 text-[12px] font-black text-orange-500 shadow-md transition-all duration-200 hover:border-orange-500 hover:bg-orange-500 hover:text-white whitespace-nowrap"
+            >
               ADD
             </motion.button>
           )}

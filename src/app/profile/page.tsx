@@ -473,10 +473,10 @@ export default function ProfilePage() {
                             </p>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
-                            {order.tableId && (
+                            {(order.tableNumber || order.tableId) && (
                               <span className="bg-slate-100 text-slate-500 text-[9px] font-bold px-2 py-1 rounded-lg flex items-center gap-1 border border-slate-200">
                                 <QrCode className="w-2.5 h-2.5" />
-                                <span className="hidden sm:inline">Table</span> {order.tableId}
+                                Table {order.tableNumber ?? order.tableId}
                               </span>
                             )}
                             <span className={`flex items-center gap-1 text-[10px] font-black px-2.5 py-1 rounded-lg border ${cfg.bg} ${cfg.color}`}>
