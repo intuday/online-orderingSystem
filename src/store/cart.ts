@@ -63,17 +63,19 @@ function resolveCouponAfterItemChange(
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CartState {
-  // ── Data ──
+  // ── Persisted data (safe to save across sessions) ──
   items:          OrderItem[];
-  tableId:        string | null;
-  customerId:     string | null;
-  customerName:   string;
-  customerPhone:  string;
   couponCode:     string | null;
   discount:       number;
   couponMinOrder: number;
   tip:            number;
   notes:          string;
+
+  // ── Session-scoped data (NOT persisted — must come fresh each visit) ──
+  tableId:        string | null;
+  customerId:     string | null;
+  customerName:   string;
+  customerPhone:  string;
   restaurantId:   string;
 
   // ── Actions ──
@@ -87,6 +89,7 @@ interface CartState {
   setTip:           (amount: number) => void;
   setNotes:         (notes: string) => void;
   clearCart:        () => void;
+  clearSession:     () => void;
 
   // ── Computed ──
   getSubtotal:      () => number;
@@ -101,15 +104,17 @@ export const useCartStore = create<CartState>()(
     (set, get) => ({
       // ── Initial State ────────────────────────────────────────────────────────
       items:          [],
-      tableId:        null,
-      customerId:     null,
-      customerName:   "",
-      customerPhone:  "",
       couponCode:     null,
       discount:       0,
       couponMinOrder: 0,
       tip:            0,
       notes:          "",
+
+      // Session-scoped fields — reset on every fresh browser load
+      tableId:        null,
+      customerId:     null,
+      customerName:   "",
+      customerPhone:  "",
       restaurantId:   DEFAULT_RESTAURANT_ID,
 
       // ── Actions ──────────────────────────────────────────────────────────────
@@ -202,6 +207,20 @@ export const useCartStore = create<CartState>()(
           notes:          "",
         }),
 
+      /**
+       * Clears session-scoped fields (table + customer info).
+       * Used on logout so a fresh user doesn't inherit stale session data.
+       * Does NOT clear items — those are user's own selections.
+       */
+      clearSession: () =>
+        set({
+          tableId:       null,
+          customerId:    null,
+          customerName:  "",
+          customerPhone: "",
+          restaurantId:  DEFAULT_RESTAURANT_ID,
+        }),
+
       // ── Computed ─────────────────────────────────────────────────────────────
 
       getSubtotal: () => computeSubtotal(get().items),
@@ -226,27 +245,18 @@ export const useCartStore = create<CartState>()(
     {
       name: "restaurant-cart",
 
-      // Explicitly define what gets persisted.
-      // Functions (actions/computed) are excluded — they are never serializable.
-      // This prevents accidental serialization of future sensitive fields.
-      partialize: (state): Omit<CartState,
-        | "setTable" | "setCustomer" | "setRestaurant"
-        | "addItem"  | "removeItem"  | "updateQuantity"
-        | "setCoupon"| "setTip"      | "setNotes"
-        | "clearCart"| "getSubtotal" | "getItemCount"
-        | "getValidDiscount"
-      > => ({
+      // ✅ Only persist cart items and preferences.
+      // Session-scoped fields (tableId, customerId, customerName, customerPhone,
+      // restaurantId) are intentionally EXCLUDED so they must come from a fresh
+      // QR scan + auth session each time. Prevents stale table binding and
+      // cross-session data leaks.
+      partialize: (state) => ({
         items:          state.items,
-        tableId:        state.tableId,
-        customerId:     state.customerId,
-        customerName:   state.customerName,
-        customerPhone:  state.customerPhone,
         couponCode:     state.couponCode,
         discount:       state.discount,
         couponMinOrder: state.couponMinOrder,
         tip:            state.tip,
         notes:          state.notes,
-        restaurantId:   state.restaurantId,
       }),
     }
   )

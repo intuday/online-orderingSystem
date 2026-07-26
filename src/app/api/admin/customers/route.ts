@@ -6,6 +6,7 @@ import {
   query, where, orderBy, limit,
 }                              from "@/lib/firebase-admin";
 import { verifyAdmin }         from "@/lib/auth/server-auth";
+import { firestoreToMs }       from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -39,16 +40,6 @@ interface RawUser {
   email?:       string;
   phone?:       string;
   createdAt?:   unknown;
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function extractSeconds(value: unknown): number {
-  if (!value || typeof value !== "object") return 0;
-  const v = value as Record<string, unknown>;
-  if (typeof v._seconds === "number") return v._seconds;
-  if (typeof v.seconds  === "number") return v.seconds;
-  return 0;
 }
 
 // ─── GET /api/admin/customers ─────────────────────────────────────────────────
@@ -114,7 +105,7 @@ export async function GET() {
 
       // Sort once — used for both lastOrderAt and lastOrderStatus
       const sortedOrders = [...uniqueOrders].sort(
-        (a, b) => extractSeconds(b.createdAt) - extractSeconds(a.createdAt)
+        (a, b) => firestoreToMs(b.createdAt) - firestoreToMs(a.createdAt)
       );
 
       const lastOrder = sortedOrders[0];
@@ -138,13 +129,18 @@ export async function GET() {
       const phone = order.customerPhone;
       if (!phone || customerMap.has(phone)) continue;
 
-      const guestOrders  = ordersByPhone[phone] ?? [];
-      const sortedGuest  = [...guestOrders].sort(
-        (a, b) => extractSeconds(a.createdAt) - extractSeconds(b.createdAt)
+      const guestOrders = ordersByPhone[phone] ?? [];
+
+      // Sort ascending for createdAt (first order)
+      const sortedGuestAsc = [...guestOrders].sort(
+        (a, b) => firestoreToMs(a.createdAt) - firestoreToMs(b.createdAt)
       );
-      const lastOrder    = guestOrders.sort(
-        (a, b) => extractSeconds(b.createdAt) - extractSeconds(a.createdAt)
-      )[0];
+
+      // Sort descending for lastOrder (most recent)
+      const sortedGuestDesc = [...guestOrders].sort(
+        (a, b) => firestoreToMs(b.createdAt) - firestoreToMs(a.createdAt)
+      );
+      const lastOrder = sortedGuestDesc[0];
 
       customerMap.set(phone, {
         id:              phone,
@@ -153,17 +149,17 @@ export async function GET() {
         phone,
         totalOrders:     guestOrders.length,
         totalSpent:      guestOrders.reduce((s, o) => s + (Number(o.total) || 0), 0),
-        lastOrderAt:     lastOrder?.createdAt      ?? null,
-        lastOrderStatus: lastOrder?.status         ?? null,
-        createdAt:       sortedGuest[0]?.createdAt ?? order.createdAt ?? null,
+        lastOrderAt:     lastOrder?.createdAt         ?? null,
+        lastOrderStatus: lastOrder?.status            ?? null,
+        createdAt:       sortedGuestAsc[0]?.createdAt ?? order.createdAt ?? null,
         source:          "guest",
       });
     }
 
     // ── Sort by most recent order ───────────────────────────────────────────
     const customers = Array.from(customerMap.values()).sort((a, b) => {
-      const aT = extractSeconds((a as Record<string, unknown>).lastOrderAt);
-      const bT = extractSeconds((b as Record<string, unknown>).lastOrderAt);
+      const aT = firestoreToMs((a as Record<string, unknown>).lastOrderAt);
+      const bT = firestoreToMs((b as Record<string, unknown>).lastOrderAt);
       return bT - aT;
     });
 

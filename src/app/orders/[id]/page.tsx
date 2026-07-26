@@ -9,7 +9,7 @@ import {
   XCircle, Phone, QrCode, Receipt,
   IndianRupee, RefreshCw,
 }                                                     from "lucide-react";
-import { formatCurrency }                             from "@/lib/utils";
+import { formatCurrency, firestoreToMs }              from "@/lib/utils";
 import type { Order, OrderItem, OrderStatus }         from "@/lib/types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -35,19 +35,8 @@ const STATUS_ORDER: OrderStatus[] = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function extractMs(value: unknown): number {
-  if (!value) return 0;
-  if (typeof value === "string") return new Date(value).getTime();
-  if (typeof value === "object" && value !== null) {
-    const v = value as Record<string, unknown>;
-    if (typeof v._seconds === "number") return v._seconds * 1000;
-    if (typeof v.seconds  === "number") return v.seconds  * 1000;
-  }
-  return 0;
-}
-
 function timeAgo(value: unknown): string {
-  const ms = extractMs(value);
+  const ms = firestoreToMs(value);
   if (!ms) return "";
   const diff  = Date.now() - ms;
   const mins  = Math.floor(diff / 60_000);

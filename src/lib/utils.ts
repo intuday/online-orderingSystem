@@ -32,7 +32,7 @@ export function formatCurrency(amount: number): string {
  * India GST rate split: 2.5% CGST + 2.5% SGST = 5% total.
  * Both components are always equal — use this single constant.
  */
-export const GST_COMPONENT_RATE = 0.025; // 2.5% each for CGST and SGST
+export const GST_COMPONENT_RATE = 0.025;
 
 /**
  * Calculates CGST (Central GST) at 2.5% on the given subtotal.
@@ -45,7 +45,6 @@ export function calculateCGST(subtotal: number): number {
 /**
  * Calculates SGST (State GST) at 2.5% on the given subtotal.
  * Returns a whole number (rounded).
- * Note: CGST and SGST are always equal — both delegate to the same rate constant.
  */
 export function calculateSGST(subtotal: number): number {
   return Math.round(subtotal * GST_COMPONENT_RATE);
@@ -53,7 +52,6 @@ export function calculateSGST(subtotal: number): number {
 
 /**
  * Calculates total GST (CGST + SGST = 5%) on the given subtotal.
- * Convenience function to avoid calling both individually.
  */
 export function calculateTotalGST(subtotal: number): number {
   return calculateCGST(subtotal) + calculateSGST(subtotal);
@@ -65,11 +63,6 @@ export function calculateTotalGST(subtotal: number): number {
  * Generates a display-friendly order number.
  *
  * Format: ORD-YYYYMMDD-HHMMSS-XXXX
- * - Date + time component reduces same-day collisions
- * - 6-char random suffix for additional uniqueness
- *
- * NOTE: This is for display only. The Firestore document ID
- * is the canonical unique identifier for an order.
  */
 export function generateOrderNumber(): string {
   const now    = new Date();
@@ -95,25 +88,28 @@ export function slugify(text: string): string {
     .toString()
     .toLowerCase()
     .trim()
-    .replace(/\s+/g, "-")       // Spaces → hyphens
-    .replace(/[^\w-]+/g, "")    // Remove special characters (hyphen at end = unambiguous)
-    .replace(/-{2,}/g, "-");    // Collapse multiple hyphens
+    .replace(/\s+/g, "-")
+    .replace(/[^\w-]+/g, "")
+    .replace(/-{2,}/g, "-");
 }
 
-// ─── Date Formatting ──────────────────────────────────────────────────────────
+// ─── Firestore Timestamp Helpers ──────────────────────────────────────────────
+//
+// SINGLE SOURCE OF TRUTH for Firestore timestamp extraction.
+// All routes and components MUST import from here — do not duplicate.
 
 /**
- * Safely converts any date-like value to a JavaScript Date.
+ * Safely converts any Firestore-like timestamp value to a JavaScript Date.
  *
  * Handles:
  * - JavaScript Date objects
  * - ISO strings and numeric timestamps
  * - Firestore Timestamp objects (with .toDate() method)
- * - Raw Firestore timestamp shapes ({ seconds, _seconds })
+ * - Raw serialized Firestore timestamps ({ seconds, _seconds })
  *
  * Returns null if the value cannot be parsed.
  */
-function toSafeDate(input: unknown): Date | null {
+export function firestoreToDate(input: unknown): Date | null {
   if (!input) return null;
 
   // Native Date
@@ -154,6 +150,26 @@ function toSafeDate(input: unknown): Date | null {
 
   return null;
 }
+
+/**
+ * Extracts milliseconds from any Firestore-like timestamp value.
+ * Returns 0 if the value cannot be parsed.
+ *
+ * Useful for sorting and comparisons.
+ */
+export function firestoreToMs(input: unknown): number {
+  const d = firestoreToDate(input);
+  return d ? d.getTime() : 0;
+}
+
+/**
+ * @deprecated Use firestoreToDate instead. Kept for backward compatibility.
+ */
+function toSafeDate(input: unknown): Date | null {
+  return firestoreToDate(input);
+}
+
+// ─── Date Formatting ──────────────────────────────────────────────────────────
 
 /**
  * Formats a date-like value as a full date + time string.

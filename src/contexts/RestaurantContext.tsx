@@ -1,9 +1,11 @@
 // src/contexts/RestaurantContext.tsx
 //
 // Provides restaurant data to the component tree.
-// Fetches from /api/admin/settings which returns only restaurant data —
-// not the full menu payload that /api/menu returns.
-// This avoids fetching categories, products, and offers just to get restaurant info.
+// Fetches from /api/restaurant — a public endpoint that returns only
+// non-sensitive restaurant info (name, logo, hours, theme).
+//
+// Previously called /api/admin/settings which was semantically incorrect
+// for customer-facing pages.
 
 "use client";
 
@@ -20,8 +22,7 @@ import type { Restaurant } from "@/lib/types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const RESTAURANT_ID =
-  process.env.NEXT_PUBLIC_RESTAURANT_ID ?? "";
+const RESTAURANT_ID = process.env.NEXT_PUBLIC_RESTAURANT_ID ?? "";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -56,16 +57,16 @@ export function RestaurantProvider({ children }: { children: ReactNode }) {
     setError(null);
 
     try {
-      // Use /api/admin/settings — returns only restaurant data.
-      // Avoids /api/menu which fetches categories + products + offers unnecessarily.
+      // ✅ Use public /api/restaurant endpoint.
+      // Returns only safe public fields — no financial config, no payment credentials.
       const url = RESTAURANT_ID
-        ? `/api/admin/settings?restaurantId=${encodeURIComponent(RESTAURANT_ID)}`
-        : "/api/admin/settings";
+        ? `/api/restaurant?restaurantId=${encodeURIComponent(RESTAURANT_ID)}`
+        : "/api/restaurant";
 
       const res = await fetch(url);
 
       if (!res.ok) {
-        throw new Error(`Failed to load restaurant settings (${res.status})`);
+        throw new Error(`Failed to load restaurant (${res.status})`);
       }
 
       const data = await res.json() as { restaurant?: Restaurant };

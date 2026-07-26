@@ -5,6 +5,7 @@ import {
   query, where, orderBy, limit,
 }                                from "@/lib/firebase-admin";
 import { verifyAdmin }           from "@/lib/auth/server-auth";
+import { firestoreToMs }         from "@/lib/utils";
 import type { Order, OrderItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -28,16 +29,6 @@ const REPORTS_ORDER_LIMIT = 1000;
 
 interface RawOrder extends Order {
   isPaid?: boolean;
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function extractMs(value: unknown): number {
-  if (!value || typeof value !== "object") return 0;
-  const v = value as Record<string, unknown>;
-  if (typeof v._seconds === "number") return v._seconds * 1000;
-  if (typeof v.seconds  === "number") return v.seconds  * 1000;
-  return 0;
 }
 
 // ─── Route Handler ────────────────────────────────────────────────────────────
@@ -81,7 +72,7 @@ export async function GET(request: NextRequest) {
     })) as RawOrder[];
 
     // Filter to period in memory (after server-side limit)
-    const filtered = orders.filter((o) => extractMs(o.createdAt) >= cutoff);
+    const filtered = orders.filter((o) => firestoreToMs(o.createdAt) >= cutoff);
 
     // ── Single pass stats ───────────────────────────────────────────────────
 
@@ -110,7 +101,7 @@ export async function GET(request: NextRequest) {
       ordersByStatus[s] = (ordersByStatus[s] ?? 0) + 1;
 
       // Chart breakdown
-      const ms = extractMs(o.createdAt);
+      const ms = firestoreToMs(o.createdAt);
       if (ms) {
         const key = new Date(ms).toLocaleDateString("en-IN", {
           day:   "2-digit",
