@@ -9,7 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatCurrency } from "@/lib/utils";
-
+import { ImageUploader } from "@/components/ImageUploader";
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface MenuItem {
   id:         string;
@@ -509,20 +509,16 @@ function OfferForm({
                     placeholder="Offer details..."
                     className="w-full h-16 p-3 rounded-xl border border-slate-200 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-orange-400"
                   />
+                  
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Banner Image URL</label>
-                  <input
-                    value={image}
-                    onChange={(e) => setImage(e.target.value)}
-                    placeholder="https://..."
-                    className="w-full h-10 px-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400"
-                  />
-                  {image && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={image} alt="preview" className="mt-2 w-full h-28 object-cover rounded-xl" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
-                  )}
-                </div>
+                               {/* ✅ Image uploader with Upload + URL tabs */}
+                <ImageUploader
+                  label="Offer Banner Image"
+                  value={image}
+                  onChange={(url) => setImage(url)}
+                  folder="offers"
+                  helpText="Upload a banner image or paste URL"
+                />
               </div>
 
               {/* ── DISCOUNT TYPE ── */}

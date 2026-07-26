@@ -2,10 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Search, Edit2, Trash2, X, Eye, EyeOff, Flame, Star } from "lucide-react";
+import { Plus, Search, Edit2, Trash2, X, Eye, EyeOff } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ImageUploader } from "@/components/ImageUploader";
 import type { MenuItem, Category } from "@/lib/types";
 
 export default function AdminMenuPage() {
@@ -104,6 +105,7 @@ export default function AdminMenuPage() {
             className={`flex gap-4 bg-white rounded-2xl p-4 shadow-card ${!item.isAvailable ? "opacity-60" : ""}`}
           >
             {item.image ? (
+              // eslint-disable-next-line @next/next/no-img-element
               <img src={item.image} alt={item.name} className="w-20 h-20 rounded-xl object-cover flex-shrink-0" />
             ) : (
               <div className="w-20 h-20 rounded-xl bg-slate-100 flex items-center justify-center text-2xl flex-shrink-0">🍽️</div>
@@ -251,10 +253,16 @@ function MenuItemForm({ item, categories, onClose, onSave }: { item: MenuItem | 
               <input type="number" value={form.comparePrice} onChange={(e) => setForm({ ...form, comparePrice: Number(e.target.value) })} className="w-full h-10 px-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
             </div>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">Image URL</label>
-            <input value={form.image} onChange={(e) => setForm({ ...form, image: e.target.value })} className="w-full h-10 px-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
-          </div>
+
+          {/* ✅ NEW — Image uploader with Upload + URL tabs */}
+          <ImageUploader
+            label="Item Image"
+            value={form.image}
+            onChange={(url) => setForm({ ...form, image: url })}
+            folder="menu"
+            helpText="Upload from device or paste an image URL"
+          />
+
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">Category</label>
             <select value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })} className="w-full h-10 px-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400">
