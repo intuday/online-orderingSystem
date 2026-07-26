@@ -28,19 +28,29 @@ const VALID_PAYMENT_MODES: PaymentMode[] = [
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ExistingOrderData {
-  tableId?:   string;
-  sessionId?: string;
-  status?:    OrderStatus;
+  tableId?:      string;
+  sessionId?:    string;
+  status?:       OrderStatus;
+  paymentStatus?: PaymentStatus;
   [key: string]: unknown;
 }
 
 // ─── GET /api/orders/[id] ─────────────────────────────────────────────────────
 
 export async function GET(
-  _request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // ── Authentication ──────────────────────────────────────────────────────
+    const verified = await verifyAuthToken(request);
+    if (!verified) {
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 }
+      );
+    }
+
     const { id } = await params;
 
     const snap = await getDoc(doc(db, "orders", id));
@@ -49,7 +59,10 @@ export async function GET(
       return NextResponse.json({ error: "Order not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ order: { id: snap.id, ...snap.data() } });
+    return NextResponse.json(
+      { order: { id: snap.id, ...snap.data() } },
+      { headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } }
+    );
   } catch (error) {
     console.error("Order fetch error:", error);
     return NextResponse.json({ error: "Failed to fetch order" }, { status: 500 });
@@ -119,24 +132,35 @@ export async function PATCH(
     // ── Build Update Payload ────────────────────────────────────────────────
 
     const updateData: Record<string, unknown> = {
-      updatedAt: serverTimestamp(),
+      updatedAt:    serverTimestamp(),
+      updatedByUid: verified.uid,
     };
 
     if (body.status)        updateData.status        = body.status;
     if (body.paymentStatus) updateData.paymentStatus = body.paymentStatus;
     if (body.paymentMode)   updateData.paymentMode   = body.paymentMode;
 
+    // Sync isPaid flag with paymentStatus
     if (body.paymentStatus === "paid") {
       updateData.isPaid = true;
       updateData.paidAt = serverTimestamp();
+    } else if (body.paymentStatus === "unpaid" || body.paymentStatus === "refunded") {
+      updateData.isPaid = false;
     }
 
     await updateDoc(orderRef, updateData);
 
-    // ── Side Effects (parallel) ─────────────────────────────────────────────
-    // Run table release and session end concurrently — they are independent.
+    // ── Side Effects on Terminal Status ─────────────────────────────────────
+    // When order completes/cancels:
+    // 1. Release table (make available for next customer)
+    // 2. End session (mark ENDED so getActiveSession returns null)
+    // 3. Both run in parallel — independent operations
 
     if (nextStatus && TERMINAL_STATUSES.includes(nextStatus)) {
+      const endReason = nextStatus === "cancelled"
+        ? "order_cancelled"
+        : "order_completed";
+
       await Promise.allSettled([
         existingOrder.tableId
           ? updateDoc(doc(db, "tables", existingOrder.tableId), {
@@ -146,7 +170,11 @@ export async function PATCH(
               occupiedBy:       null,
               occupiedByUid:    null,
               occupiedAt:       null,
+              reservedByUid:    null,
+              reservedBy:       null,
+              reservedAt:       null,
               clearedAt:        serverTimestamp(),
+              updatedAt:        serverTimestamp(),
             })
           : Promise.resolve(),
 
@@ -154,8 +182,9 @@ export async function PATCH(
           ? updateDoc(doc(db, "sessions", existingOrder.sessionId), {
               status:       "ENDED",
               endedAt:      serverTimestamp(),
-              endReason:    "order_finished",
+              endReason,
               lastActivity: serverTimestamp(),
+              updatedAt:    serverTimestamp(),
             })
           : Promise.resolve(),
       ]);
@@ -164,16 +193,18 @@ export async function PATCH(
     // ── Return Response ─────────────────────────────────────────────────────
     // Construct from known data — avoids a second Firestore read.
 
-    return NextResponse.json({
-      order: {
-        id,
-        ...existingOrder,
-        ...updateData,
-        // Replace server timestamps with ISO strings for client consumption
-        updatedAt: new Date().toISOString(),
-        ...(body.paymentStatus === "paid" ? { paidAt: new Date().toISOString() } : {}),
+    return NextResponse.json(
+      {
+        order: {
+          id,
+          ...existingOrder,
+          ...updateData,
+          updatedAt: new Date().toISOString(),
+          ...(body.paymentStatus === "paid" ? { paidAt: new Date().toISOString() } : {}),
+        },
       },
-    });
+      { headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } }
+    );
 
   } catch (error) {
     console.error("Order update error:", error);
