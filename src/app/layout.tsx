@@ -2,12 +2,11 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode }          from "react";
 import { Inter }                   from "next/font/google";
-import { AuthProvider }            from "@/contexts/AuthContext";
 import { RestaurantProvider }      from "@/contexts/RestaurantContext";
 import { BottomNav }               from "@/components/BottomNav";
 import "./globals.css";
 
-// ─── Font ─────────────────────────────────────────────────────────────────────
+// ─── Font ────────────────────────────────────────────────────────────────────
 // next/font/google self-hosts the font — no external network request at runtime.
 // Eliminates render-blocking external font link and layout shift.
 
@@ -18,7 +17,7 @@ const inter = Inter({
   variable: "--font-inter",
 });
 
-// ─── Metadata ─────────────────────────────────────────────────────────────────
+// ─── Metadata ────────────────────────────────────────────────────────────────
 
 export const metadata: Metadata = {
   title:       "The Royal Kitchen - Premium Dining",
@@ -34,18 +33,16 @@ export const viewport: Viewport = {
   themeColor:   "#f97316",
 };
 
-// ─── Root Layout ──────────────────────────────────────────────────────────────
+// ─── Root Layout ─────────────────────────────────────────────────────────────
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={inter.variable} suppressHydrationWarning>
       <body className="bg-[#fafafa] text-slate-900 antialiased font-sans">
-        <AuthProvider>
-          <RestaurantProvider>
-            {children}
-            <BottomNav />
-          </RestaurantProvider>
-        </AuthProvider>
+        <RestaurantProvider>
+          {children}
+          <BottomNav />
+        </RestaurantProvider>
       </body>
     </html>
   );

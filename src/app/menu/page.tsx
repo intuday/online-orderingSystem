@@ -98,15 +98,31 @@ export default function MenuPage() {
   const evaluateCart       = useOfferEngine((s) => s.evaluateCart);
   const showRewardSelector = useOfferEngine((s) => s.showRewardSelector);
 
+    // Fetch auth once — cached in ref for session creation to reuse
+  const authCheckRef = useRef<{
+    authenticated: boolean;
+    uid?:   string;
+    name?:  string;
+    phone?: string;
+  } | null>(null);
+
   useEffect(() => {
     fetch("/api/auth/verify-status")
       .then((r) => r.json())
       .then((d) => {
+        authCheckRef.current = {
+          authenticated: !!d.authenticated,
+          uid:           d.user?.uid,
+          name:          d.user?.name,
+          phone:         d.user?.phone,
+        };
         if (d.authenticated && d.user) {
           setCustomer(d.user.uid || "", d.user.name || "", d.user.phone || "");
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        authCheckRef.current = { authenticated: false };
+      });
   }, [setCustomer]);
 
   useEffect(() => {
@@ -229,13 +245,14 @@ export default function MenuPage() {
     return () => window.clearInterval(interval);
   }, [data?.offers?.length, search]);
 
-  useEffect(() => {
+    useEffect(() => {
     const createSession = async () => {
       if (!tableId || sessionCreated) return;
       try {
-        const authRes  = await fetch("/api/auth/verify-status", { cache: "no-store" });
-        const authData = await authRes.json();
-        if (!authData.authenticated) return;
+        // Reuse cached auth result — no duplicate Firestore read
+        // If ref not set yet, mount effect hasn't run — bail out
+        if (!authCheckRef.current) return;
+        if (!authCheckRef.current.authenticated) return;
 
         const payload = qrToken
           ? { qrToken }
@@ -1640,7 +1657,7 @@ function CartSheet({
     }
   };
 
-  const handlePlaceOrder = async () => {
+   const handlePlaceOrder = async () => {
     if (cartItems.length === 0 && promoItems.length === 0) return;
 
     // ✅ TABLE REQUIRED — QR scan ke bina dine-in order block karo
@@ -1648,16 +1665,9 @@ function CartSheet({
       return;
     }
 
-    const authRes  = await fetch("/api/auth/verify-status", { method: "GET", cache: "no-store" });
-    const authData = await authRes.json();
-
-    if (!authData.authenticated) {
-      const params = new URLSearchParams();
-      if (tableId) params.set("table", tableId);
-      const menuUrl = params.toString() ? `/menu?${params.toString()}` : "/menu";
-      window.location.href = `/login?redirect=${encodeURIComponent(menuUrl)}`;
-      return;
-    }
+    // ✅ Server verifies auth via cookie on POST /api/orders
+    // If unauthenticated, POST returns 401 and we redirect below
+    // No client-side verify-status call needed — saves 1 Firestore read
 
     setOrdering(true);
 
@@ -1700,9 +1710,9 @@ function CartSheet({
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({
           tableId,
-          customerId:     authData.user?.uid    ?? null,
-          customerName:   authData.user?.name   || customerName  || "Guest",
-          customerPhone:  authData.user?.phone  || customerPhone || "",
+          customerId:     null,
+          customerName:   customerName  || "Guest",
+          customerPhone:  customerPhone || "",
           items:          allItems,
           subtotal:       grossSubtotal,
           notes,
