@@ -25,11 +25,22 @@ const CACHE_TTL_MS  = 60_000; // 60 seconds
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+/** Offer with all fields required by the Menu Page for correct type detection */
+interface OfferWithDetails extends Offer {
+  offerType?:        string;
+  comboItems?:       unknown[];
+  comboPrice?:       number | null;
+  condition?:        unknown;
+  reward?:           unknown;
+  priority?:         number;
+  maxUsagePerOrder?: number;
+}
+
 interface MenuPayload {
   restaurant: Restaurant | { id: string; name: string };
   categories: Category[];
   items:      MenuItem[];
-  offers:     Offer[];
+  offers:     OfferWithDetails[];
 }
 
 interface MenuCache {
@@ -79,14 +90,23 @@ interface RawProduct {
 }
 
 interface RawOffer {
-  isActive?:      boolean;
-  title?:         string;
-  description?:   string;
-  image?:         string;
-  discountType?:  string;
-  discountValue?: number;
-  restaurantId?:  string;
-  [key: string]:  unknown;
+  isActive?:         boolean;
+  title?:            string;
+  description?:      string;
+  image?:            string;
+  offerType?:        string;
+  discountType?:     string;
+  discountValue?:    number;
+  restaurantId?:     string;
+  condition?:        unknown;
+  reward?:           unknown;
+  comboItems?:       unknown;
+  comboPrice?:       number | null;
+  priority?:         number;
+  maxUsagePerOrder?: number;
+  validFrom?:        unknown;
+  validTo?:          unknown;
+  [key: string]:     unknown;
 }
 
 // ─── In-memory Cache ──────────────────────────────────────────────────────────
@@ -129,6 +149,64 @@ function normalizeProduct(id: string, raw: RawProduct): MenuItem {
 
 function getSortOrder(raw: RawCategory | RawProduct): number {
   return (raw.sortOrder ?? raw.order ?? 0) as number;
+}
+
+/** Safely parse a field that may be stored as JSON string, array, or object */
+function parseFlexibleField<T>(value: unknown, fallback: T): T {
+  if (value === null || value === undefined) return fallback;
+  if (Array.isArray(value)) return value as unknown as T;
+  if (typeof value === "object") return value as T;
+  if (typeof value === "string") {
+    try { return JSON.parse(value) as T; }
+    catch { return fallback; }
+  }
+  return fallback;
+}
+
+/**
+ * Normalize a raw offer document into the full shape expected by the Menu Page.
+ * Handles multiple field-name conventions (camelCase, snake_case) and JSON-string fields.
+ */
+function normalizeOffer(id: string, raw: RawOffer): OfferWithDetails {
+  // Accept both `offerType` and possible legacy names
+  const offerType = (
+    raw.offerType ??
+    (raw as { offer_type?: string }).offer_type ??
+    (raw as { type?: string }).type ??
+    "discount"
+  ) as string;
+
+  return {
+    id,
+    restaurantId:     (raw.restaurantId  ?? "") as string,
+    title:            (raw.title         ?? "") as string,
+    description:      (raw.description   ?? "") as string,
+    image:            (raw.image         ?? "") as string,
+
+    // ✅ Critical: offer type drives the entire UI behavior
+    offerType,
+
+    // Discount fields
+    discountType:     (raw.discountType  ?? "percentage") as string,
+    discountValue:    Number(raw.discountValue ?? 0),
+
+    // ✅ Combo fields — parse flexibly (may be JSON string or array)
+    comboItems:       parseFlexibleField<unknown[]>(raw.comboItems, []),
+    comboPrice:       raw.comboPrice !== undefined && raw.comboPrice !== null
+                        ? Number(raw.comboPrice)
+                        : null,
+
+    // ✅ Condition (BXGY / Free Item / Discount rules)
+    condition:        parseFlexibleField<unknown>(raw.condition, null),
+
+    // ✅ Reward (BXGY / Free Item)
+    reward:           parseFlexibleField<unknown>(raw.reward, null),
+
+    // Metadata
+    priority:         Number(raw.priority         ?? 0),
+    maxUsagePerOrder: Number(raw.maxUsagePerOrder ?? 1),
+    isActive:         raw.isActive ?? true,
+  };
 }
 
 // ─── Route Handler ────────────────────────────────────────────────────────────
@@ -215,21 +293,15 @@ export async function GET(request: Request) {
     }
 
     // ── Offers ────────────────────────────────────────────────────────────────
-    const offers: Offer[] =
+    // ✅ FIX: Return ALL offer fields (offerType, comboItems, comboPrice, condition, reward)
+    // so the Menu Page can correctly render Combo / BXGY / Free Item / Discount UI.
+    const offers: OfferWithDetails[] =
       offersResult.status === "fulfilled"
         ? offersResult.value.docs
-            .map((d) => ({ id: d.id, ...(d.data() as RawOffer) }))
+            .map((d) => normalizeOffer(d.id, d.data() as RawOffer))
             .filter((o) => o.isActive !== false)
-            .map((o) => ({
-              id:            o.id,
-              restaurantId:  o.restaurantId  as string | undefined,
-              title:         (o.title        ?? "") as string,
-              description:   o.description   as string | undefined,
-              image:         o.image         as string | undefined,
-              discountType:  (o.discountType  ?? "percentage") as string,
-              discountValue: (o.discountValue ?? 0) as number,
-              isActive:      o.isActive       ?? true,
-            }))
+            // Highest priority first — banner shows top offer
+            .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
         : [];
 
     if (offersResult.status === "rejected") {
